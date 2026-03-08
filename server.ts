@@ -4,10 +4,16 @@ import cookieParser from 'cookie-parser';
 import { db } from './src/db.ts';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { authenticator } from 'otplib';
+import { TOTP, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
 import qrcode from 'qrcode';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
+
+const totp = new TOTP({
+  issuer: 'Secure Issue Forums',
+  crypto: new NobleCryptoPlugin(),
+  base32: new ScureBase32Plugin(),
+});
 
 async function startServer() {
   const app = express();
@@ -39,13 +45,13 @@ async function startServer() {
     }
     try {
       const hash = bcrypt.hashSync(password, 10);
-      const secret = authenticator.generateSecret();
+      const secret = totp.generateSecret();
       const pic = profile_picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
       
       const stmt = db.prepare('INSERT INTO users (email, username, password_hash, profile_picture, two_factor_secret) VALUES (?, ?, ?, ?, ?)');
       const info = stmt.run(email, username, hash, pic, secret);
       
-      const otpauth = authenticator.keyuri(email, 'Secure Issue Forums', secret);
+      const otpauth = totp.toURI({ label: email, secret });
       const qrCodeUrl = await qrcode.toDataURL(otpauth);
       
       res.json({ id: info.lastInsertRowid, qrCode: qrCodeUrl, secret });
@@ -55,7 +61,7 @@ async function startServer() {
   });
 
   // Auth: Login
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const { email, password, code } = req.body;
     if (!email || !password || !code) {
       return res.status(400).json({ error: 'Missing fields. 2FA code required.' });
@@ -66,8 +72,8 @@ async function startServer() {
     }
     
     // Verify 2FA
-    const isValid = authenticator.check(code, user.two_factor_secret);
-    if (!isValid) {
+    const result = await totp.verify(code, { secret: user.two_factor_secret });
+    if (!result.valid) {
       return res.status(401).json({ error: 'Invalid 2FA code' });
     }
 

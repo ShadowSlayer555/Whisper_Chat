@@ -5,7 +5,7 @@ import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, 
 import { format } from 'date-fns';
 import { UserMenu } from './UserMenu';
 
-const MessageNode = ({ msg, user, onReply, depth = 0 }: { msg: any, user: any, onReply: (msg: any) => void, depth?: number }) => {
+const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, depth?: number }> = ({ msg, user, onReply, depth = 0 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const isMe = msg.user_id === user.id;
 
