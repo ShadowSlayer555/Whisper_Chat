@@ -26,6 +26,11 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use(cookieParser());
 
+  // Global BigInt serializer for JSON responses
+  (BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+  };
+
   // --- Auth Middleware ---
   const authenticate = (req: any, res: any, next: any) => {
     const token = req.cookies.token;
@@ -60,7 +65,7 @@ async function startServer() {
       const otpauth = totp.toURI({ label: email, secret });
       const qrCodeUrl = await qrcode.toDataURL(otpauth);
       
-      res.json({ id: stmt.lastInsertRowid, qrCode: qrCodeUrl, secret });
+      res.json({ id: stmt.lastInsertRowid?.toString(), qrCode: qrCodeUrl, secret });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
@@ -131,7 +136,7 @@ async function startServer() {
         sql: 'INSERT INTO forums (title, description, creator_id) VALUES (?, ?, ?)',
         args: [title, description || null, req.user.id]
       });
-      res.json({ id: stmt.lastInsertRowid });
+      res.json({ id: stmt.lastInsertRowid?.toString() });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
@@ -247,7 +252,7 @@ async function startServer() {
       }
     }
 
-    res.json({ id: messageId });
+    res.json({ id: messageId?.toString() });
   });
 
   // Mentions: Mark as read
