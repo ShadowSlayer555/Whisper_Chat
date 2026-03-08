@@ -4,13 +4,14 @@ import { Upload } from 'lucide-react';
 
 export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
   const [isLogin, setIsLogin] = useState(true);
-  const [require2FA, setRequire2FA] = useState(false);
+  const [requireVerification, setRequireVerification] = useState(false);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [profilePic, setProfilePic] = useState('');
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -24,46 +25,64 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
     try {
-      if (require2FA) {
-        const user = await fetchApi('/api/auth/verify-2fa', {
+      if (requireVerification) {
+        const user = await fetchApi('/api/auth/verify-email', {
           method: 'POST',
           body: JSON.stringify({ email, code }),
         });
         onLogin(user);
       } else if (isLogin) {
-        const res = await fetchApi('/api/auth/login', {
+        const user = await fetchApi('/api/auth/login', {
           method: 'POST',
           body: JSON.stringify({ email, password }),
         });
-        if (res.require2FA) {
-          setRequire2FA(true);
-          setError('A 6-digit code has been sent to your email.');
-        }
+        onLogin(user);
       } else {
-        await fetchApi('/api/auth/register', {
+        const res = await fetchApi('/api/auth/register', {
           method: 'POST',
           body: JSON.stringify({ email, username, password, profile_picture: profilePic }),
         });
-        setIsLogin(true);
-        setPassword('');
-        setError('Registration successful. Please log in.');
+        if (res.requireVerification) {
+          setRequireVerification(true);
+          setSuccessMsg('A 6-digit verification code has been sent to your email.');
+        }
       }
     } catch (err: any) {
       setError(err.message);
     }
   };
 
-  if (require2FA) {
+  const handleResend = async () => {
+    setError('');
+    setSuccessMsg('');
+    try {
+      await fetchApi('/api/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      setSuccessMsg('A new code has been sent to your email.');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  if (requireVerification) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-md p-8 text-center">
-          <h2 className="text-2xl font-bold text-slate-900 mb-4">Two-Factor Authentication</h2>
+          <h2 className="text-2xl font-bold text-slate-900 mb-4">Verify Your Email</h2>
           <p className="text-slate-600 mb-6">Enter the 6-digit code sent to <strong>{email}</strong>.</p>
           
           {error && (
-            <div className={`p-3 rounded-lg mb-4 text-sm ${error.includes('sent') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+            <div className="p-3 rounded-lg mb-4 text-sm bg-red-50 text-red-700">
               {error}
+            </div>
+          )}
+          {successMsg && (
+            <div className="p-3 rounded-lg mb-4 text-sm bg-emerald-50 text-emerald-700">
+              {successMsg}
             </div>
           )}
 
@@ -83,20 +102,29 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
               type="submit"
               className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors"
             >
-              Verify Code
+              Verify Account
             </button>
           </form>
           
-          <button
-            onClick={() => {
-              setRequire2FA(false);
-              setCode('');
-              setError('');
-            }}
-            className="mt-6 text-sm text-slate-500 hover:text-slate-700 transition-colors"
-          >
-            Cancel and return to login
-          </button>
+          <div className="mt-6 flex flex-col space-y-3">
+            <button
+              onClick={handleResend}
+              className="text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors"
+            >
+              Resend Code
+            </button>
+            <button
+              onClick={() => {
+                setRequireVerification(false);
+                setCode('');
+                setError('');
+                setSuccessMsg('');
+              }}
+              className="text-sm text-slate-500 hover:text-slate-700 transition-colors"
+            >
+              Cancel and return to login
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -110,8 +138,13 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
         </h2>
         
         {error && (
-          <div className={`p-3 rounded-lg mb-4 text-sm ${error.includes('successful') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+          <div className="p-3 rounded-lg mb-4 text-sm bg-red-50 text-red-700">
             {error}
+          </div>
+        )}
+        {successMsg && (
+          <div className="p-3 rounded-lg mb-4 text-sm bg-emerald-50 text-emerald-700">
+            {successMsg}
           </div>
         )}
 
@@ -181,6 +214,7 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
             onClick={() => {
               setIsLogin(!isLogin);
               setError('');
+              setSuccessMsg('');
             }}
             className="text-indigo-600 hover:text-indigo-700 font-medium"
           >

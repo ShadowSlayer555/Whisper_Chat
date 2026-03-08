@@ -18,6 +18,8 @@ export const initDb = async () => {
       password_hash TEXT NOT NULL,
       profile_picture TEXT,
       two_factor_secret TEXT,
+      is_verified BOOLEAN DEFAULT 0,
+      last_email_sent_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -62,4 +64,8 @@ export const initDb = async () => {
       FOREIGN KEY (forum_id) REFERENCES forums(id)
     );
   `);
+
+  // Migrations for existing database
+  try { await db.execute('ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT 1'); } catch (e) {}
+  try { await db.execute('ALTER TABLE users ADD COLUMN last_email_sent_at DATETIME'); } catch (e) {}
 };

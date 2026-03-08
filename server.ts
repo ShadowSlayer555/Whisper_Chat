@@ -39,28 +39,124 @@ async function startServer() {
 
   // --- API Routes ---
 
-  // Auth: Register
+  // Auth: Register (Step 1: Create unverified account and send email)
   app.post('/api/auth/register', async (req, res) => {
     const { email, username, password, profile_picture } = req.body;
     if (!email || !username || !password) {
       return res.status(400).json({ error: 'Missing fields' });
     }
     try {
+      const existingUserResult = await db.execute({
+        sql: 'SELECT * FROM users WHERE email = ? OR username = ?',
+        args: [email, username]
+      });
+      const existingUser = existingUserResult.rows[0] as any;
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
       const hash = bcrypt.hashSync(password, 10);
       const pic = profile_picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
-      
-      const stmt = await db.execute({
-        sql: 'INSERT INTO users (email, username, password_hash, profile_picture) VALUES (?, ?, ?, ?)',
-        args: [email, username, hash, pic]
-      });
-      
-      res.json({ id: stmt.lastInsertRowid?.toString(), success: true });
+
+      if (existingUser) {
+        if (existingUser.is_verified) {
+          return res.status(400).json({ error: 'Username or email already exists' });
+        } else {
+          // Check 10 minute cooldown
+          if (existingUser.last_email_sent_at) {
+            const lastSent = new Date(existingUser.last_email_sent_at + 'Z').getTime();
+            const now = Date.now();
+            if (now - lastSent < 10 * 60 * 1000) {
+              const minutesLeft = Math.ceil((10 * 60 * 1000 - (now - lastSent)) / 60000);
+              return res.status(429).json({ error: `Please wait ${minutesLeft} minutes before requesting a new code.` });
+            }
+          }
+          // Update unverified user
+          await db.execute({
+            sql: 'UPDATE users SET username = ?, password_hash = ?, profile_picture = ?, two_factor_secret = ?, last_email_sent_at = CURRENT_TIMESTAMP WHERE email = ?',
+            args: [username, hash, pic, code, email]
+          });
+        }
+      } else {
+        // Insert new unverified user
+        await db.execute({
+          sql: 'INSERT INTO users (email, username, password_hash, profile_picture, two_factor_secret, is_verified, last_email_sent_at) VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)',
+          args: [email, username, hash, pic, code]
+        });
+      }
+
+      // Send email
+      try {
+        if (process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PUBLIC_KEY && process.env.EMAILJS_PRIVATE_KEY) {
+          await emailjs.send(
+            process.env.EMAILJS_SERVICE_ID,
+            process.env.EMAILJS_TEMPLATE_ID,
+            { to_email: email, code: code },
+            { publicKey: process.env.EMAILJS_PUBLIC_KEY, privateKey: process.env.EMAILJS_PRIVATE_KEY }
+          );
+        } else {
+          console.log(`[DEV MODE] Verification Code for ${email}: ${code}`);
+        }
+      } catch (err) {
+        console.error('Failed to send email via EmailJS:', err);
+      }
+
+      res.json({ requireVerification: true, email });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
   });
 
-  // Auth: Login (Step 1: Check credentials and send email)
+  // Auth: Resend Verification Email
+  app.post('/api/auth/resend-verification', async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    try {
+      const userResult = await db.execute({
+        sql: 'SELECT * FROM users WHERE email = ?',
+        args: [email]
+      });
+      const user = userResult.rows[0] as any;
+      
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.is_verified) return res.status(400).json({ error: 'User is already verified' });
+
+      if (user.last_email_sent_at) {
+        const lastSent = new Date(user.last_email_sent_at + 'Z').getTime();
+        const now = Date.now();
+        if (now - lastSent < 10 * 60 * 1000) {
+          const minutesLeft = Math.ceil((10 * 60 * 1000 - (now - lastSent)) / 60000);
+          return res.status(429).json({ error: `Please wait ${minutesLeft} minutes before requesting a new code.` });
+        }
+      }
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      await db.execute({
+        sql: 'UPDATE users SET two_factor_secret = ?, last_email_sent_at = CURRENT_TIMESTAMP WHERE email = ?',
+        args: [code, email]
+      });
+
+      try {
+        if (process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PUBLIC_KEY && process.env.EMAILJS_PRIVATE_KEY) {
+          await emailjs.send(
+            process.env.EMAILJS_SERVICE_ID,
+            process.env.EMAILJS_TEMPLATE_ID,
+            { to_email: email, code: code },
+            { publicKey: process.env.EMAILJS_PUBLIC_KEY, privateKey: process.env.EMAILJS_PRIVATE_KEY }
+          );
+        } else {
+          console.log(`[DEV MODE] Verification Code for ${email}: ${code}`);
+        }
+      } catch (err) {
+        console.error('Failed to send email via EmailJS:', err);
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Auth: Login (Direct login, no 2FA)
   app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -75,43 +171,17 @@ async function startServer() {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    // Generate 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Save code to database
-    await db.execute({
-      sql: 'UPDATE users SET two_factor_secret = ? WHERE id = ?',
-      args: [code, user.id]
-    });
-
-    try {
-      if (process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PUBLIC_KEY && process.env.EMAILJS_PRIVATE_KEY) {
-        await emailjs.send(
-          process.env.EMAILJS_SERVICE_ID,
-          process.env.EMAILJS_TEMPLATE_ID,
-          {
-            to_email: user.email,
-            code: code,
-          },
-          {
-            publicKey: process.env.EMAILJS_PUBLIC_KEY,
-            privateKey: process.env.EMAILJS_PRIVATE_KEY,
-          }
-        );
-      } else {
-        // If no EmailJS configured, log it for testing purposes
-        console.log(`[DEV MODE] 2FA Code for ${user.email}: ${code}`);
-      }
-    } catch (err) {
-      console.error('Failed to send email via EmailJS:', err);
-      // We still proceed so the user can see the console log in dev mode
+    if (!user.is_verified) {
+      return res.status(403).json({ error: 'Please verify your email first. Switch to Register to resend the code.' });
     }
 
-    res.json({ require2FA: true, email: user.email });
+    const token = jwt.sign({ id: user.id, email: user.email, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
+    res.json({ id: user.id, email: user.email, username: user.username, profile_picture: user.profile_picture });
   });
 
-  // Auth: Verify 2FA (Step 2: Check code and issue token)
-  app.post('/api/auth/verify-2fa', async (req, res) => {
+  // Auth: Verify Email (Step 2 of Registration)
+  app.post('/api/auth/verify-email', async (req, res) => {
     const { email, code } = req.body;
     if (!email || !code) {
       return res.status(400).json({ error: 'Missing fields.' });
@@ -124,12 +194,12 @@ async function startServer() {
     const user = userResult.rows[0] as any;
     
     if (!user || user.two_factor_secret !== code) {
-      return res.status(401).json({ error: 'Invalid 2FA code' });
+      return res.status(401).json({ error: 'Invalid verification code' });
     }
 
-    // Clear the code after successful use
+    // Mark as verified and clear the code
     await db.execute({
-      sql: 'UPDATE users SET two_factor_secret = NULL WHERE id = ?',
+      sql: 'UPDATE users SET is_verified = 1, two_factor_secret = NULL WHERE id = ?',
       args: [user.id]
     });
 
