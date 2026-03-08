@@ -1,0 +1,5 @@
+{
+  "name": "Secure Issue Forums",
+  "description": "A secure, invite-only issue forum with immutable messages, 2FA, and mentions.",
+  "requestFramePermissions": []
+}
