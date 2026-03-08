@@ -4,15 +4,13 @@ import { Upload } from 'lucide-react';
 
 export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
   const [isLogin, setIsLogin] = useState(true);
+  const [require2FA, setRequire2FA] = useState(false);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [profilePic, setProfilePic] = useState('');
   const [error, setError] = useState('');
-  
-  const [qrCode, setQrCode] = useState('');
-  const [secret, setSecret] = useState('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -27,45 +25,77 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
     e.preventDefault();
     setError('');
     try {
-      if (isLogin) {
-        const user = await fetchApi('/api/auth/login', {
+      if (require2FA) {
+        const user = await fetchApi('/api/auth/verify-2fa', {
           method: 'POST',
-          body: JSON.stringify({ email, password, code }),
+          body: JSON.stringify({ email, code }),
         });
         onLogin(user);
+      } else if (isLogin) {
+        const res = await fetchApi('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+        });
+        if (res.require2FA) {
+          setRequire2FA(true);
+          setError('A 6-digit code has been sent to your email.');
+        }
       } else {
-        const res = await fetchApi('/api/auth/register', {
+        await fetchApi('/api/auth/register', {
           method: 'POST',
           body: JSON.stringify({ email, username, password, profile_picture: profilePic }),
         });
-        setQrCode(res.qrCode);
-        setSecret(res.secret);
-        setError('Registration successful. Please save your 2FA code.');
+        setIsLogin(true);
+        setPassword('');
+        setError('Registration successful. Please log in.');
       }
     } catch (err: any) {
       setError(err.message);
     }
   };
 
-  if (qrCode) {
+  if (require2FA) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-md p-8 text-center">
-          <h2 className="text-2xl font-bold text-slate-900 mb-4">Set up 2FA</h2>
-          <p className="text-slate-600 mb-6">Scan this QR code with your authenticator app (like Google Authenticator or Authy).</p>
-          <img src={qrCode} alt="QR Code" className="mx-auto mb-4 border border-slate-200 rounded-xl p-2" />
-          <p className="text-sm text-slate-500 mb-2">Or enter this code manually:</p>
-          <code className="bg-slate-100 px-4 py-2 rounded-lg text-lg font-mono tracking-widest text-slate-800 block mb-8">{secret}</code>
+          <h2 className="text-2xl font-bold text-slate-900 mb-4">Two-Factor Authentication</h2>
+          <p className="text-slate-600 mb-6">Enter the 6-digit code sent to <strong>{email}</strong>.</p>
+          
+          {error && (
+            <div className={`p-3 rounded-lg mb-4 text-sm ${error.includes('sent') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-mono tracking-widest text-center text-2xl"
+                placeholder="123456"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors"
+            >
+              Verify Code
+            </button>
+          </form>
+          
           <button
             onClick={() => {
-              setQrCode('');
-              setIsLogin(true);
+              setRequire2FA(false);
               setCode('');
-              setPassword('');
+              setError('');
             }}
-            className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors"
+            className="mt-6 text-sm text-slate-500 hover:text-slate-700 transition-colors"
           >
-            I've saved it, continue to Login
+            Cancel and return to login
           </button>
         </div>
       </div>
@@ -136,21 +166,6 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
               placeholder="••••••••"
             />
           </div>
-
-          {isLogin && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">2FA Code</label>
-              <input
-                type="text"
-                required
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-mono tracking-widest text-center"
-                placeholder="123456"
-              />
-            </div>
-          )}
 
           <button
             type="submit"

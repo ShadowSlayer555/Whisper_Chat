@@ -4,18 +4,11 @@ import cookieParser from 'cookie-parser';
 import { db, initDb } from './src/db.ts';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { TOTP, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
-import qrcode from 'qrcode';
+import emailjs from '@emailjs/nodejs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
-
-const totp = new TOTP({
-  issuer: 'Secure Issue Forums',
-  crypto: new NobleCryptoPlugin(),
-  base32: new ScureBase32Plugin(),
-});
 
 async function startServer() {
   await initDb();
@@ -54,28 +47,24 @@ async function startServer() {
     }
     try {
       const hash = bcrypt.hashSync(password, 10);
-      const secret = totp.generateSecret();
       const pic = profile_picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
       
       const stmt = await db.execute({
-        sql: 'INSERT INTO users (email, username, password_hash, profile_picture, two_factor_secret) VALUES (?, ?, ?, ?, ?)',
-        args: [email, username, hash, pic, secret]
+        sql: 'INSERT INTO users (email, username, password_hash, profile_picture) VALUES (?, ?, ?, ?)',
+        args: [email, username, hash, pic]
       });
       
-      const otpauth = totp.toURI({ label: email, secret });
-      const qrCodeUrl = await qrcode.toDataURL(otpauth);
-      
-      res.json({ id: stmt.lastInsertRowid?.toString(), qrCode: qrCodeUrl, secret });
+      res.json({ id: stmt.lastInsertRowid?.toString(), success: true });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
   });
 
-  // Auth: Login
+  // Auth: Login (Step 1: Check credentials and send email)
   app.post('/api/auth/login', async (req, res) => {
-    const { email, password, code } = req.body;
-    if (!email || !password || !code) {
-      return res.status(400).json({ error: 'Missing fields. 2FA code required.' });
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Missing fields.' });
     }
     const userResult = await db.execute({
       sql: 'SELECT * FROM users WHERE email = ?',
@@ -86,11 +75,63 @@ async function startServer() {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    // Verify 2FA
-    const result = await totp.verify(code, { secret: user.two_factor_secret });
-    if (!result.valid) {
+    // Generate 6-digit code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Save code to database
+    await db.execute({
+      sql: 'UPDATE users SET two_factor_secret = ? WHERE id = ?',
+      args: [code, user.id]
+    });
+
+    try {
+      if (process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PUBLIC_KEY && process.env.EMAILJS_PRIVATE_KEY) {
+        await emailjs.send(
+          process.env.EMAILJS_SERVICE_ID,
+          process.env.EMAILJS_TEMPLATE_ID,
+          {
+            to_email: user.email,
+            code: code,
+          },
+          {
+            publicKey: process.env.EMAILJS_PUBLIC_KEY,
+            privateKey: process.env.EMAILJS_PRIVATE_KEY,
+          }
+        );
+      } else {
+        // If no EmailJS configured, log it for testing purposes
+        console.log(`[DEV MODE] 2FA Code for ${user.email}: ${code}`);
+      }
+    } catch (err) {
+      console.error('Failed to send email via EmailJS:', err);
+      // We still proceed so the user can see the console log in dev mode
+    }
+
+    res.json({ require2FA: true, email: user.email });
+  });
+
+  // Auth: Verify 2FA (Step 2: Check code and issue token)
+  app.post('/api/auth/verify-2fa', async (req, res) => {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ error: 'Missing fields.' });
+    }
+    
+    const userResult = await db.execute({
+      sql: 'SELECT * FROM users WHERE email = ?',
+      args: [email]
+    });
+    const user = userResult.rows[0] as any;
+    
+    if (!user || user.two_factor_secret !== code) {
       return res.status(401).json({ error: 'Invalid 2FA code' });
     }
+
+    // Clear the code after successful use
+    await db.execute({
+      sql: 'UPDATE users SET two_factor_secret = NULL WHERE id = ?',
+      args: [user.id]
+    });
 
     const token = jwt.sign({ id: user.id, email: user.email, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
     res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
