@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
-import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { format } from 'date-fns';
+import { UserMenu } from './UserMenu';
 
 const MessageNode = ({ msg, user, onReply, depth = 0 }: { msg: any, user: any, onReply: (msg: any) => void, depth?: number }) => {
   const [collapsed, setCollapsed] = useState(false);
@@ -73,11 +74,12 @@ const MessageNode = ({ msg, user, onReply, depth = 0 }: { msg: any, user: any, o
   );
 };
 
-export function Forum({ user }: { user: any }) {
+export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUser: (u: any) => void, onLogout: () => void }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const [forum, setForum] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [newMessage, setNewMessage] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [replyingTo, setReplyingTo] = useState<any>(null);
@@ -221,7 +223,12 @@ export function Forum({ user }: { user: any }) {
     return roots;
   };
 
-  const threadedMessages = buildThreadTree(messages);
+  const filteredMessages = messages.filter(m => 
+    m.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    m.username.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const threadedMessages = buildThreadTree(filteredMessages);
 
   if (!forum) return <div className="p-8 text-center">Loading...</div>;
 
@@ -241,6 +248,16 @@ export function Forum({ user }: { user: any }) {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <div className="relative mr-2">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input
+              type="text"
+              placeholder="Search messages or users..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none w-56"
+            />
+          </div>
           {isCreator && (
             <form onSubmit={handleInvite} className="flex items-center gap-2">
               <input
@@ -260,6 +277,9 @@ export function Forum({ user }: { user: any }) {
             <Download size={16} />
             Export
           </button>
+          <div className="ml-2">
+            <UserMenu user={user} onUpdate={onUpdateUser} onLogout={onLogout} />
+          </div>
         </div>
       </header>
 

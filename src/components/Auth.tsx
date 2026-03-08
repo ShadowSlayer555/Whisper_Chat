@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { fetchApi } from '../lib/api';
+import { Upload } from 'lucide-react';
 
 export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -7,7 +8,20 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
+  const [profilePic, setProfilePic] = useState('');
   const [error, setError] = useState('');
+  
+  const [qrCode, setQrCode] = useState('');
+  const [secret, setSecret] = useState('');
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setProfilePic(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,17 +34,43 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
         });
         onLogin(user);
       } else {
-        await fetchApi('/api/auth/register', {
+        const res = await fetchApi('/api/auth/register', {
           method: 'POST',
-          body: JSON.stringify({ email, username, password }),
+          body: JSON.stringify({ email, username, password, profile_picture: profilePic }),
         });
-        setIsLogin(true);
-        setError('Registration successful. Please log in.');
+        setQrCode(res.qrCode);
+        setSecret(res.secret);
+        setError('Registration successful. Please save your 2FA code.');
       }
     } catch (err: any) {
       setError(err.message);
     }
   };
+
+  if (qrCode) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-md p-8 text-center">
+          <h2 className="text-2xl font-bold text-slate-900 mb-4">Set up 2FA</h2>
+          <p className="text-slate-600 mb-6">Scan this QR code with your authenticator app (like Google Authenticator or Authy).</p>
+          <img src={qrCode} alt="QR Code" className="mx-auto mb-4 border border-slate-200 rounded-xl p-2" />
+          <p className="text-sm text-slate-500 mb-2">Or enter this code manually:</p>
+          <code className="bg-slate-100 px-4 py-2 rounded-lg text-lg font-mono tracking-widest text-slate-800 block mb-8">{secret}</code>
+          <button
+            onClick={() => {
+              setQrCode('');
+              setIsLogin(true);
+              setCode('');
+              setPassword('');
+            }}
+            className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors"
+          >
+            I've saved it, continue to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -46,6 +86,19 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!isLogin && (
+            <div className="flex flex-col items-center mb-4">
+              <div className="relative group cursor-pointer">
+                <img src={profilePic || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'default'}`} alt="Profile" className="w-20 h-20 rounded-full object-cover bg-slate-200 border-2 border-slate-200" />
+                <label className="absolute inset-0 flex items-center justify-center bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity">
+                  <Upload size={16} />
+                  <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+                </label>
+              </div>
+              <span className="text-xs text-slate-500 mt-2">Profile Picture</span>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
             <input
@@ -86,7 +139,7 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
 
           {isLogin && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">2FA Code (Any 6 digits for demo)</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">2FA Code</label>
               <input
                 type="text"
                 required

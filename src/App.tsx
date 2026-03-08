@@ -42,11 +42,11 @@ export default function App() {
       <Routes>
         <Route 
           path="/" 
-          element={user ? <ForumList user={user} onLogout={handleLogout} /> : <Auth onLogin={setUser} />} 
+          element={user ? <ForumList user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Auth onLogin={setUser} />} 
         />
         <Route 
           path="/forum/:id" 
-          element={user ? <Forum user={user} /> : <Navigate to="/" />} 
+          element={user ? <Forum user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Navigate to="/" />} 
         />
       </Routes>
     </BrowserRouter>

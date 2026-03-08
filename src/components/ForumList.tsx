@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { fetchApi } from '../lib/api';
 import { Link } from 'react-router-dom';
-import { MessageSquare, Plus, LogOut } from 'lucide-react';
+import { MessageSquare, Plus, Search } from 'lucide-react';
+import { UserMenu } from './UserMenu';
 
-export function ForumList({ user, onLogout }: { user: any, onLogout: () => void }) {
+export function ForumList({ user, onUpdateUser, onLogout }: { user: any, onUpdateUser: (u: any) => void, onLogout: () => void }) {
   const [forums, setForums] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
@@ -38,6 +40,11 @@ export function ForumList({ user, onLogout }: { user: any, onLogout: () => void 
     }
   };
 
+  const filteredForums = forums.filter(f => 
+    f.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (f.description && f.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="flex justify-between items-center mb-8">
@@ -46,6 +53,16 @@ export function ForumList({ user, onLogout }: { user: any, onLogout: () => void 
           <p className="text-slate-500 mt-1">Welcome back, {user.username}</p>
         </div>
         <div className="flex items-center gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search forums..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none w-64"
+            />
+          </div>
           <button
             onClick={() => setIsCreating(true)}
             className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors"
@@ -53,13 +70,7 @@ export function ForumList({ user, onLogout }: { user: any, onLogout: () => void 
             <Plus size={20} />
             New Forum
           </button>
-          <button
-            onClick={onLogout}
-            className="p-2 text-slate-500 hover:text-slate-900 transition-colors"
-            title="Logout"
-          >
-            <LogOut size={20} />
-          </button>
+          <UserMenu user={user} onUpdate={onUpdateUser} onLogout={onLogout} />
         </div>
       </div>
 
@@ -106,14 +117,14 @@ export function ForumList({ user, onLogout }: { user: any, onLogout: () => void 
       )}
 
       <div className="grid gap-4">
-        {forums.length === 0 ? (
+        {filteredForums.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
             <MessageSquare className="mx-auto h-12 w-12 text-slate-300 mb-3" />
-            <h3 className="text-lg font-medium text-slate-900">No forums yet</h3>
-            <p className="text-slate-500">Create one or wait for an invite.</p>
+            <h3 className="text-lg font-medium text-slate-900">{searchQuery ? 'No forums found' : 'No forums yet'}</h3>
+            <p className="text-slate-500">{searchQuery ? 'Try adjusting your search.' : 'Create one or wait for an invite.'}</p>
           </div>
         ) : (
-          forums.map((forum) => (
+          filteredForums.map((forum) => (
             <Link
               key={forum.id}
               to={`/forum/${forum.id}`}
