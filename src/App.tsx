@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Auth } from './components/Auth';
 import { ForumList } from './components/ForumList';
 import { Forum } from './components/Forum';
@@ -38,7 +38,7 @@ export default function App() {
   }
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route 
           path="/" 
@@ -49,6 +49,6 @@ export default function App() {
           element={user ? <Forum user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Navigate to="/" />} 
         />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }

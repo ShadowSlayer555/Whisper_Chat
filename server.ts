@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import cookieParser from 'cookie-parser';
-import { db } from './src/db.ts';
+import { db, initDb } from './src/db.ts';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { TOTP, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
@@ -16,6 +16,7 @@ const totp = new TOTP({
 });
 
 async function startServer() {
+  await initDb();
   const app = express();
   const PORT = 3000;
 
@@ -48,13 +49,15 @@ async function startServer() {
       const secret = totp.generateSecret();
       const pic = profile_picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
       
-      const stmt = db.prepare('INSERT INTO users (email, username, password_hash, profile_picture, two_factor_secret) VALUES (?, ?, ?, ?, ?)');
-      const info = stmt.run(email, username, hash, pic, secret);
+      const stmt = await db.execute({
+        sql: 'INSERT INTO users (email, username, password_hash, profile_picture, two_factor_secret) VALUES (?, ?, ?, ?, ?)',
+        args: [email, username, hash, pic, secret]
+      });
       
       const otpauth = totp.toURI({ label: email, secret });
       const qrCodeUrl = await qrcode.toDataURL(otpauth);
       
-      res.json({ id: info.lastInsertRowid, qrCode: qrCodeUrl, secret });
+      res.json({ id: stmt.lastInsertRowid, qrCode: qrCodeUrl, secret });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
@@ -66,7 +69,11 @@ async function startServer() {
     if (!email || !password || !code) {
       return res.status(400).json({ error: 'Missing fields. 2FA code required.' });
     }
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
+    const userResult = await db.execute({
+      sql: 'SELECT * FROM users WHERE email = ?',
+      args: [email]
+    });
+    const user = userResult.rows[0] as any;
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -87,14 +94,18 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get('/api/auth/me', authenticate, (req: any, res) => {
-    const user = db.prepare('SELECT id, email, username, profile_picture FROM users WHERE id = ?').get(req.user.id);
-    res.json(user);
+  app.get('/api/auth/me', authenticate, async (req: any, res) => {
+    const userResult = await db.execute({
+      sql: 'SELECT id, email, username, profile_picture FROM users WHERE id = ?',
+      args: [req.user.id]
+    });
+    res.json(userResult.rows[0]);
   });
 
   // Forums: List
-  app.get('/api/forums', authenticate, (req: any, res) => {
-    const forums = db.prepare(`
+  app.get('/api/forums', authenticate, async (req: any, res) => {
+    const forumsResult = await db.execute({
+      sql: `
       SELECT DISTINCT f.*, u.username as creator_username,
         (SELECT COUNT(*) FROM mentions m WHERE m.forum_id = f.id AND m.user_id = ? AND m.is_read = 0) as unread_mentions
       FROM forums f
@@ -102,46 +113,67 @@ async function startServer() {
       LEFT JOIN forum_invites fi ON f.id = fi.forum_id
       WHERE f.creator_id = ? OR fi.user_id = ?
       ORDER BY f.created_at DESC
-    `).all(req.user.id, req.user.id, req.user.id);
-    res.json(forums);
+    `,
+      args: [req.user.id, req.user.id, req.user.id]
+    });
+    res.json(forumsResult.rows);
   });
 
   // Forums: Create
-  app.post('/api/forums', authenticate, (req: any, res) => {
+  app.post('/api/forums', authenticate, async (req: any, res) => {
     const { title, description } = req.body;
     if (!title) return res.status(400).json({ error: 'Title required' });
     try {
-      const stmt = db.prepare('INSERT INTO forums (title, description, creator_id) VALUES (?, ?, ?)');
-      const info = stmt.run(title, description || null, req.user.id);
-      res.json({ id: info.lastInsertRowid });
+      const stmt = await db.execute({
+        sql: 'INSERT INTO forums (title, description, creator_id) VALUES (?, ?, ?)',
+        args: [title, description || null, req.user.id]
+      });
+      res.json({ id: stmt.lastInsertRowid });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
   });
 
   // Forums: Get single
-  app.get('/api/forums/:id', authenticate, (req: any, res) => {
+  app.get('/api/forums/:id', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
-    const access = db.prepare('SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)').get(forumId, req.user.id, req.user.id);
-    if (!access) return res.status(403).json({ error: 'Access denied' });
+    const accessResult = await db.execute({
+      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
+      args: [forumId, req.user.id, req.user.id]
+    });
+    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
 
-    const forum = db.prepare('SELECT f.*, u.username as creator_username FROM forums f JOIN users u ON f.creator_id = u.id WHERE f.id = ?').get(forumId);
-    res.json(forum);
+    const forumResult = await db.execute({
+      sql: 'SELECT f.*, u.username as creator_username FROM forums f JOIN users u ON f.creator_id = u.id WHERE f.id = ?',
+      args: [forumId]
+    });
+    res.json(forumResult.rows[0]);
   });
 
   // Forums: Invite user
-  app.post('/api/forums/:id/invite', authenticate, (req: any, res) => {
+  app.post('/api/forums/:id/invite', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
     const { email } = req.body;
-    const forum = db.prepare('SELECT creator_id FROM forums WHERE id = ?').get(forumId) as any;
+    const forumResult = await db.execute({
+      sql: 'SELECT creator_id FROM forums WHERE id = ?',
+      args: [forumId]
+    });
+    const forum = forumResult.rows[0] as any;
     if (!forum || forum.creator_id !== req.user.id) {
       return res.status(403).json({ error: 'Only creator can invite' });
     }
-    const userToInvite = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as any;
+    const userToInviteResult = await db.execute({
+      sql: 'SELECT id FROM users WHERE email = ?',
+      args: [email]
+    });
+    const userToInvite = userToInviteResult.rows[0] as any;
     if (!userToInvite) return res.status(404).json({ error: 'User not found' });
 
     try {
-      db.prepare('INSERT INTO forum_invites (forum_id, user_id) VALUES (?, ?)').run(forumId, userToInvite.id);
+      await db.execute({
+        sql: 'INSERT INTO forum_invites (forum_id, user_id) VALUES (?, ?)',
+        args: [forumId, userToInvite.id]
+      });
       res.json({ success: true });
     } catch (err) {
       res.status(400).json({ error: 'User already invited' });
@@ -149,44 +181,65 @@ async function startServer() {
   });
 
   // Messages: List for forum
-  app.get('/api/forums/:id/messages', authenticate, (req: any, res) => {
+  app.get('/api/forums/:id/messages', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
-    const access = db.prepare('SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)').get(forumId, req.user.id, req.user.id);
-    if (!access) return res.status(403).json({ error: 'Access denied' });
+    const accessResult = await db.execute({
+      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
+      args: [forumId, req.user.id, req.user.id]
+    });
+    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
 
-    const messages = db.prepare(`
+    const messagesResult = await db.execute({
+      sql: `
       SELECT m.*, u.username, u.email, u.profile_picture 
       FROM messages m 
       JOIN users u ON m.user_id = u.id 
       WHERE m.forum_id = ? 
       ORDER BY m.created_at ASC
-    `).all(forumId);
-    res.json(messages);
+    `,
+      args: [forumId]
+    });
+    res.json(messagesResult.rows);
   });
 
   // Messages: Create
-  app.post('/api/forums/:id/messages', authenticate, (req: any, res) => {
+  app.post('/api/forums/:id/messages', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
     const { content, parent_id } = req.body;
     if (!content) return res.status(400).json({ error: 'Content required' });
 
-    const access = db.prepare('SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)').get(forumId, req.user.id, req.user.id);
-    if (!access) return res.status(403).json({ error: 'Access denied' });
+    const accessResult = await db.execute({
+      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
+      args: [forumId, req.user.id, req.user.id]
+    });
+    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
 
-    const stmt = db.prepare('INSERT INTO messages (forum_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)');
-    const info = stmt.run(forumId, req.user.id, content, parent_id || null);
-    const messageId = info.lastInsertRowid;
+    const stmt = await db.execute({
+      sql: 'INSERT INTO messages (forum_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)',
+      args: [forumId, req.user.id, content, parent_id || null]
+    });
+    const messageId = stmt.lastInsertRowid;
 
     const mentionRegex = /@([a-zA-Z0-9_]+)/g;
     const matches = [...content.matchAll(mentionRegex)];
     const mentionedUsernames = [...new Set(matches.map(m => m[1]))];
 
     for (const username of mentionedUsernames) {
-      const mentionedUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as any;
+      const mentionedUserResult = await db.execute({
+        sql: 'SELECT id FROM users WHERE username = ?',
+        args: [username]
+      });
+      const mentionedUser = mentionedUserResult.rows[0] as any;
       if (mentionedUser) {
-        const hasAccess = db.prepare('SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)').get(forumId, mentionedUser.id, mentionedUser.id);
-        if (hasAccess) {
-          db.prepare('INSERT INTO mentions (message_id, user_id, forum_id) VALUES (?, ?, ?)').run(messageId, mentionedUser.id, forumId);
+        const hasAccessResult = await db.execute({
+          sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
+          args: [forumId, mentionedUser.id, mentionedUser.id]
+        });
+        if (hasAccessResult.rows.length > 0) {
+          await db.execute({
+            sql: 'INSERT INTO mentions (message_id, user_id, forum_id) VALUES (?, ?, ?)',
+            args: [messageId, mentionedUser.id, forumId]
+          });
         }
       }
     }
@@ -195,28 +248,41 @@ async function startServer() {
   });
 
   // Mentions: Mark as read
-  app.post('/api/forums/:id/mentions/read', authenticate, (req: any, res) => {
+  app.post('/api/forums/:id/mentions/read', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
-    db.prepare('UPDATE mentions SET is_read = 1 WHERE forum_id = ? AND user_id = ?').run(forumId, req.user.id);
+    await db.execute({
+      sql: 'UPDATE mentions SET is_read = 1 WHERE forum_id = ? AND user_id = ?',
+      args: [forumId, req.user.id]
+    });
     res.json({ success: true });
   });
 
   // Users: Search
-  app.get('/api/users/search', authenticate, (req: any, res) => {
+  app.get('/api/users/search', authenticate, async (req: any, res) => {
     const q = req.query.q;
     if (!q) return res.json([]);
-    const users = db.prepare('SELECT id, username, email, profile_picture FROM users WHERE username LIKE ? OR email LIKE ? LIMIT 10').all(`%${q}%`, `%${q}%`);
-    res.json(users);
+    const usersResult = await db.execute({
+      sql: 'SELECT id, username, email, profile_picture FROM users WHERE username LIKE ? OR email LIKE ? LIMIT 10',
+      args: [`%${q}%`, `%${q}%`]
+    });
+    res.json(usersResult.rows);
   });
 
   // Users: Update Profile
-  app.put('/api/users/me', authenticate, (req: any, res) => {
+  app.put('/api/users/me', authenticate, async (req: any, res) => {
     const { username, profile_picture } = req.body;
     if (!username) return res.status(400).json({ error: 'Username required' });
     try {
-      db.prepare('UPDATE users SET username = ?, profile_picture = ? WHERE id = ?').run(username, profile_picture, req.user.id);
+      await db.execute({
+        sql: 'UPDATE users SET username = ?, profile_picture = ? WHERE id = ?',
+        args: [username, profile_picture, req.user.id]
+      });
       
-      const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id) as any;
+      const userResult = await db.execute({
+        sql: 'SELECT * FROM users WHERE id = ?',
+        args: [req.user.id]
+      });
+      const user = userResult.rows[0] as any;
       const token = jwt.sign({ id: user.id, email: user.email, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
       res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
       
