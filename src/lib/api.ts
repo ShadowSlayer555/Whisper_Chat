@@ -7,8 +7,18 @@ export const fetchApi = async (url: string, options: RequestInit = {}) => {
     },
   });
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'An error occurred' }));
-    throw new Error(error.error || 'An error occurred');
+    let errorMsg = 'An error occurred';
+    try {
+      const errorData = await res.json();
+      errorMsg = errorData.error || errorMsg;
+    } catch (e) {
+      if (res.status === 413) {
+        errorMsg = 'File too large. Please choose a smaller image.';
+      } else {
+        errorMsg = `Server error (${res.status}). Please try again later.`;
+      }
+    }
+    throw new Error(errorMsg);
   }
   return res.json();
 };
