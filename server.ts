@@ -6,6 +6,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { TOTP, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
 import qrcode from 'qrcode';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 
@@ -298,6 +300,13 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+  } else {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
