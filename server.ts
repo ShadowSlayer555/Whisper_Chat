@@ -7,8 +7,12 @@ import jwt from 'jsonwebtoken';
 import emailjs from '@emailjs/nodejs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { GoogleGenAI } from '@google/genai';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
+
+// Initialize Gemini
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 async function startServer() {
   await initDb();
@@ -364,6 +368,57 @@ async function startServer() {
     }
 
     res.json({ id: messageId?.toString() });
+  });
+
+  // Forums: AI Summary
+  app.get('/api/forums/:id/summary', authenticate, async (req: any, res) => {
+    const forumId = req.params.id;
+    
+    // Check access
+    const accessResult = await db.execute({
+      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
+      args: [forumId, req.user.id, req.user.id]
+    });
+    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+
+    // Fetch forum details
+    const forumResult = await db.execute({
+      sql: 'SELECT title, description FROM forums WHERE id = ?',
+      args: [forumId]
+    });
+    const forum = forumResult.rows[0] as any;
+
+    // Fetch all messages
+    const messagesResult = await db.execute({
+      sql: `
+      SELECT m.content, u.username, m.created_at
+      FROM messages m 
+      JOIN users u ON m.user_id = u.id 
+      WHERE m.forum_id = ? 
+      ORDER BY m.created_at ASC
+    `,
+      args: [forumId]
+    });
+
+    if (messagesResult.rows.length === 0) {
+      return res.json({ summary: "No messages in this forum yet to summarize." });
+    }
+
+    let transcript = `Forum Title: ${forum.title}\nDescription: ${forum.description || 'N/A'}\n\nMessages:\n`;
+    messagesResult.rows.forEach((m: any) => {
+      transcript += `[${new Date(m.created_at).toLocaleString()}] ${m.username}: ${m.content}\n`;
+    });
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: \`Analyze the following forum transcript and provide a comprehensive summary. Include who thinks what, the major issues discussed, and the different sides taken. Keep it concise but informative.\\n\\nTranscript:\\n\${transcript}\`,
+      });
+      res.json({ summary: response.text });
+    } catch (err: any) {
+      console.error("AI Summary Error:", err);
+      res.status(500).json({ error: "Failed to generate summary." });
+    }
   });
 
   // Mentions: Mark as read

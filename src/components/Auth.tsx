@@ -134,7 +134,7 @@ export function Auth({ onLogin }: { onLogin: (user: any) => void }) {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-md p-8">
         <h2 className="text-2xl font-bold text-center text-slate-900 mb-6">
-          {isLogin ? 'Sign In to Secure Forums' : 'Create an Account'}
+          {isLogin ? 'Sign In to Whisper Chat' : 'Create an Account'}
         </h2>
         
         {error && (

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
-import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search, Info, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { UserMenu } from './UserMenu';
+import Markdown from 'react-markdown';
 
 const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, depth?: number }> = ({ msg, user, onReply, depth = 0 }) => {
   const [collapsed, setCollapsed] = useState(false);
@@ -86,6 +87,9 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionResults, setMentionResults] = useState<any[]>([]);
   const [showMentions, setShowMentions] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [summaryText, setSummaryText] = useState('');
+  const [isSummarizing, setIsSummarizing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -204,6 +208,21 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
     URL.revokeObjectURL(url);
   };
 
+  const handleSummarize = async () => {
+    setShowSummary(true);
+    if (!summaryText) {
+      setIsSummarizing(true);
+      try {
+        const data = await fetchApi(`/api/forums/${id}/summary`);
+        setSummaryText(data.summary);
+      } catch (err: any) {
+        setSummaryText('Failed to generate summary: ' + err.message);
+      } finally {
+        setIsSummarizing(false);
+      }
+    }
+  };
+
   const buildThreadTree = (flatMessages: any[]) => {
     const map = new Map();
     const roots: any[] = [];
@@ -235,7 +254,7 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
   const isCreator = forum.creator_id === user.id;
 
   return (
-    <div className="max-w-5xl mx-auto h-screen flex flex-col bg-slate-50">
+    <div className="max-w-5xl mx-auto h-screen flex flex-col bg-slate-50 relative">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
@@ -352,6 +371,57 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
           </form>
         </div>
       </div>
+
+      {/* Floating Action Button for AI Summary */}
+      <button
+        onClick={handleSummarize}
+        className="absolute bottom-24 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-500 hover:scale-105 transition-all flex items-center justify-center z-10"
+        title="AI Forum Summary"
+      >
+        <Info size={28} />
+      </button>
+
+      {/* Summary Modal */}
+      {showSummary && (
+        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-2xl max-h-[80vh] rounded-2xl shadow-xl flex flex-col">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Info size={20} className="text-indigo-600" />
+                AI Forum Summary
+              </h3>
+              <button onClick={() => setShowSummary(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-500">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              {isSummarizing ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-500 space-y-4">
+                  <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                  <p>Analyzing conversation and generating summary...</p>
+                </div>
+              ) : (
+                <div className="prose prose-slate max-w-none">
+                  <div className="markdown-body">
+                    <Markdown>{summaryText}</Markdown>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl flex justify-end">
+              <button
+                onClick={() => {
+                  setSummaryText('');
+                  handleSummarize();
+                }}
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+              >
+                Regenerate Summary
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
