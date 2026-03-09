@@ -11,8 +11,16 @@ import { GoogleGenAI } from '@google/genai';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let ai: GoogleGenAI | null = null;
+function getAi() {
+  if (!ai) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not set");
+    }
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return ai;
+}
 
 async function startServer() {
   await initDb();
@@ -410,9 +418,10 @@ async function startServer() {
     });
 
     try {
-      const response = await ai.models.generateContent({
+      const aiClient = getAi();
+      const response = await aiClient.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: \`Analyze the following forum transcript and provide a comprehensive summary. Include who thinks what, the major issues discussed, and the different sides taken. Keep it concise but informative.\\n\\nTranscript:\\n\${transcript}\`,
+        contents: `Analyze the following forum transcript and provide a comprehensive summary. Include who thinks what, the major issues discussed, and the different sides taken. Keep it concise but informative.\n\nTranscript:\n${transcript}`,
       });
       res.json({ summary: response.text });
     } catch (err: any) {
