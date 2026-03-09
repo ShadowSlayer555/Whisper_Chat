@@ -23,13 +23,34 @@ export const initDb = async () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS offices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      creator_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (creator_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS office_members (
+      office_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      role TEXT DEFAULT 'member',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (office_id, user_id),
+      FOREIGN KEY (office_id) REFERENCES offices(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
     CREATE TABLE IF NOT EXISTS forums (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       description TEXT,
       creator_id INTEGER NOT NULL,
+      office_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (creator_id) REFERENCES users(id)
+      FOREIGN KEY (creator_id) REFERENCES users(id),
+      FOREIGN KEY (office_id) REFERENCES offices(id)
     );
 
     CREATE TABLE IF NOT EXISTS forum_invites (
@@ -68,4 +89,7 @@ export const initDb = async () => {
   // Migrations for existing database
   try { await db.execute('ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT 1'); } catch (e) {}
   try { await db.execute('ALTER TABLE users ADD COLUMN last_email_sent_at DATETIME'); } catch (e) {}
+  try { await db.execute('ALTER TABLE forums ADD COLUMN office_id INTEGER REFERENCES offices(id)'); } catch (e) {}
+  try { await db.execute('ALTER TABLE office_members ADD COLUMN kicked_at DATETIME'); } catch (e) {}
+  try { await db.execute("ALTER TABLE messages ADD COLUMN type TEXT DEFAULT 'user'"); } catch (e) {}
 };

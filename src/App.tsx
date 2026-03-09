@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Auth } from './components/Auth';
-import { ForumList } from './components/ForumList';
+import { OfficeList } from './components/OfficeList';
+import { Office } from './components/Office';
 import { Forum } from './components/Forum';
 import { fetchApi } from './lib/api';
 
@@ -76,13 +77,17 @@ export default function App() {
           path="/" 
           element={
             user ? (
-              <ForumList user={user} onUpdateUser={setUser} onLogout={handleLogout} />
+              <OfficeList user={user} onUpdateUser={setUser} onLogout={handleLogout} />
             ) : showAuth ? (
               <Auth onLogin={setUser} />
             ) : (
               <LandingPage onSignInClick={() => setShowAuth(true)} />
             )
           } 
+        />
+        <Route 
+          path="/office/:id" 
+          element={user ? <Office user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Navigate to="/" />} 
         />
         <Route 
           path="/forum/:id" 

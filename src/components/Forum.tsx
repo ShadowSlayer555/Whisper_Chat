@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
-import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search, Info, X } from 'lucide-react';
+import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search, Info, X, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { UserMenu } from './UserMenu';
 import Markdown from 'react-markdown';
@@ -9,6 +9,14 @@ import Markdown from 'react-markdown';
 const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, depth?: number }> = ({ msg, user, onReply, depth = 0 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const isMe = msg.user_id === user.id;
+
+  if (msg.type === 'system_kick') {
+    return (
+      <div className="my-6 p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl text-center shadow-sm">
+        <p className="font-medium">{msg.content}</p>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex flex-col ${depth > 0 ? 'ml-4 sm:ml-8 mt-4 border-l-2 border-slate-200 pl-4' : 'mt-6'}`}>
@@ -90,6 +98,7 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
   const [showSummary, setShowSummary] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [aiWarning, setAiWarning] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -99,6 +108,20 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
     const interval = setInterval(loadMessages, 5000); // Poll for new messages
     return () => clearInterval(interval);
   }, [id]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (newMessage.trim().length > 5) {
+        fetchApi('/api/analyze-message', {
+          method: 'POST',
+          body: JSON.stringify({ content: newMessage, forumId: id })
+        }).then(res => setAiWarning(res.warning)).catch(() => setAiWarning(null));
+      } else {
+        setAiWarning(null);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [newMessage, id]);
 
   const loadForum = async () => {
     try {
@@ -258,7 +281,7 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
       {/* Header */}
       <header className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/')} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+          <button onClick={() => navigate(forum.office_id ? `/office/${forum.office_id}` : '/')} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
             <ArrowLeft size={20} className="text-slate-600" />
           </button>
           <div>
@@ -277,21 +300,6 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
               className="pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none w-56"
             />
           </div>
-          {isCreator && (
-            <form onSubmit={handleInvite} className="flex items-center gap-2">
-              <input
-                type="email"
-                placeholder="Invite by email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none w-48"
-                required
-              />
-              <button type="submit" className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors" title="Invite User">
-                <UserPlus size={18} />
-              </button>
-            </form>
-          )}
           <button onClick={handleCopyChat} className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors">
             <Download size={16} />
             Export
@@ -318,6 +326,12 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
       {/* Input Area */}
       <div className="bg-white border-t border-slate-200 p-4 shrink-0">
         <div className="max-w-4xl mx-auto relative">
+          {aiWarning && (
+            <div className="absolute bottom-full mb-3 left-0 right-0 bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl shadow-lg text-sm flex items-start gap-2 animate-in fade-in slide-in-from-bottom-2 z-20">
+              <AlertTriangle size={18} className="shrink-0 mt-0.5 text-amber-600" />
+              <p className="font-medium">{aiWarning}</p>
+            </div>
+          )}
           {replyingTo && (
             <div className="mb-2 flex items-center justify-between bg-slate-50 border border-slate-200 p-2 rounded-lg text-sm">
               <div className="flex items-center gap-2 text-slate-600">

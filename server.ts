@@ -233,7 +233,242 @@ async function startServer() {
     res.json(userResult.rows[0]);
   });
 
-  // Forums: List
+  async function checkForumAccess(forumId: string | number, userId: string | number) {
+    const forumResult = await db.execute({
+      sql: 'SELECT office_id, creator_id FROM forums WHERE id = ?',
+      args: [forumId]
+    });
+    if (forumResult.rows.length === 0) return { hasAccess: false };
+    const forum = forumResult.rows[0] as any;
+
+    if (forum.office_id) {
+      const accessResult = await db.execute({
+        sql: 'SELECT role, kicked_at FROM office_members WHERE office_id = ? AND user_id = ?',
+        args: [forum.office_id, userId]
+      });
+      if (accessResult.rows.length > 0) {
+        return { 
+          hasAccess: true, 
+          role: accessResult.rows[0].role, 
+          kicked_at: accessResult.rows[0].kicked_at 
+        };
+      }
+      return { hasAccess: false };
+    } else {
+      const accessResult = await db.execute({
+        sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
+        args: [forumId, userId, userId]
+      });
+      return { hasAccess: accessResult.rows.length > 0 };
+    }
+  }
+
+  // Offices: Create
+  app.post('/api/offices', authenticate, async (req: any, res) => {
+    const { name, description } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+
+    const stmt = await db.execute({
+      sql: 'INSERT INTO offices (name, description, creator_id) VALUES (?, ?, ?)',
+      args: [name, description, req.user.id]
+    });
+    const officeId = stmt.lastInsertRowid;
+
+    await db.execute({
+      sql: 'INSERT INTO office_members (office_id, user_id, role) VALUES (?, ?, ?)',
+      args: [officeId, req.user.id, 'creator']
+    });
+
+    res.json({ id: officeId?.toString() });
+  });
+
+  // Offices: List
+  app.get('/api/offices', authenticate, async (req: any, res) => {
+    const result = await db.execute({
+      sql: `
+        SELECT o.*, om.role 
+        FROM offices o
+        JOIN office_members om ON o.id = om.office_id
+        WHERE om.user_id = ?
+        ORDER BY o.created_at DESC
+      `,
+      args: [req.user.id]
+    });
+    res.json(result.rows);
+  });
+
+  // Offices: Get details (forums and members)
+  app.get('/api/offices/:id', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    
+    const accessResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, req.user.id]
+    });
+    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+    const userRole = accessResult.rows[0].role;
+
+    const officeResult = await db.execute({
+      sql: 'SELECT * FROM offices WHERE id = ?',
+      args: [officeId]
+    });
+    const office = officeResult.rows[0];
+
+    const forumsResult = await db.execute({
+      sql: 'SELECT * FROM forums WHERE office_id = ? ORDER BY created_at DESC',
+      args: [officeId]
+    });
+
+    const membersResult = await db.execute({
+      sql: `
+        SELECT u.id, u.username, u.email, u.profile_picture, om.role
+        FROM users u
+        JOIN office_members om ON u.id = om.user_id
+        WHERE om.office_id = ? AND om.role != 'kicked'
+      `,
+      args: [officeId]
+    });
+
+    res.json({
+      ...office,
+      userRole,
+      forums: forumsResult.rows,
+      members: membersResult.rows
+    });
+  });
+
+  // Offices: Invite member
+  app.post('/api/offices/:id/invite', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    const { email } = req.body;
+
+    const accessResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, req.user.id]
+    });
+    if (accessResult.rows.length === 0 || (accessResult.rows[0].role !== 'creator' && accessResult.rows[0].role !== 'admin')) {
+      return res.status(403).json({ error: 'Only admins can invite members' });
+    }
+
+    const userResult = await db.execute({
+      sql: 'SELECT id FROM users WHERE email = ?',
+      args: [email]
+    });
+    if (userResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const targetUserId = userResult.rows[0].id;
+
+    const existingResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, targetUserId]
+    });
+
+    if (existingResult.rows.length > 0) {
+      if (existingResult.rows[0].role === 'kicked') {
+        await db.execute({
+          sql: "UPDATE office_members SET role = 'member', kicked_at = NULL WHERE office_id = ? AND user_id = ?",
+          args: [officeId, targetUserId]
+        });
+        return res.json({ success: true });
+      }
+      return res.status(400).json({ error: 'User already in office' });
+    }
+
+    try {
+      await db.execute({
+        sql: 'INSERT INTO office_members (office_id, user_id, role) VALUES (?, ?, ?)',
+        args: [officeId, targetUserId, 'member']
+      });
+      res.json({ success: true });
+    } catch (err) {
+      res.status(400).json({ error: 'User already in office' });
+    }
+  });
+
+  // Offices: Promote to admin
+  app.post('/api/offices/:id/members/:userId/admin', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    const targetUserId = req.params.userId;
+
+    const accessResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, req.user.id]
+    });
+    if (accessResult.rows.length === 0 || (accessResult.rows[0].role !== 'creator' && accessResult.rows[0].role !== 'admin')) {
+      return res.status(403).json({ error: 'Only admins can promote members' });
+    }
+
+    await db.execute({
+      sql: "UPDATE office_members SET role = 'admin' WHERE office_id = ? AND user_id = ? AND role = 'member'",
+      args: [officeId, targetUserId]
+    });
+
+    res.json({ success: true });
+  });
+
+  // Offices: Kick member
+  app.post('/api/offices/:id/members/:userId/kick', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    const targetUserId = req.params.userId;
+
+    const accessResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, req.user.id]
+    });
+    if (accessResult.rows.length === 0 || (accessResult.rows[0].role !== 'creator' && accessResult.rows[0].role !== 'admin')) {
+      return res.status(403).json({ error: 'Only admins can kick members' });
+    }
+
+    const targetUserResult = await db.execute({
+      sql: 'SELECT username FROM users WHERE id = ?',
+      args: [targetUserId]
+    });
+    const targetUsername = targetUserResult.rows[0]?.username;
+
+    await db.execute({
+      sql: "UPDATE office_members SET role = 'kicked', kicked_at = CURRENT_TIMESTAMP WHERE office_id = ? AND user_id = ?",
+      args: [officeId, targetUserId]
+    });
+
+    const forumsResult = await db.execute({
+      sql: 'SELECT id FROM forums WHERE office_id = ?',
+      args: [officeId]
+    });
+
+    const now = new Date().toLocaleString();
+    const kickMessage = `${targetUsername} was kicked from the group on ${now}. They can no longer see new messages.`;
+
+    for (const forum of forumsResult.rows) {
+      await db.execute({
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_kick')",
+        args: [forum.id, req.user.id, kickMessage]
+      });
+    }
+
+    res.json({ success: true });
+  });
+
+  // Offices: Create Forum
+  app.post('/api/offices/:id/forums', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    const { title, description } = req.body;
+
+    const accessResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, req.user.id]
+    });
+    if (accessResult.rows.length === 0 || (accessResult.rows[0].role !== 'creator' && accessResult.rows[0].role !== 'admin')) {
+      return res.status(403).json({ error: 'Only admins can create forums' });
+    }
+
+    const stmt = await db.execute({
+      sql: 'INSERT INTO forums (title, description, creator_id, office_id) VALUES (?, ?, ?, ?)',
+      args: [title, description, req.user.id, officeId]
+    });
+
+    res.json({ id: stmt.lastInsertRowid?.toString() });
+  });
+
+  // Forums: List (Legacy, maybe keep for backwards compatibility)
   app.get('/api/forums', authenticate, async (req: any, res) => {
     const forumsResult = await db.execute({
       sql: `
@@ -268,11 +503,10 @@ async function startServer() {
   // Forums: Get single
   app.get('/api/forums/:id', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
-    const accessResult = await db.execute({
-      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
-      args: [forumId, req.user.id, req.user.id]
-    });
-    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+    const access = await checkForumAccess(forumId, req.user.id);
+    if (!access.hasAccess) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     const forumResult = await db.execute({
       sql: 'SELECT f.*, u.username as creator_username FROM forums f JOIN users u ON f.creator_id = u.id WHERE f.id = ?',
@@ -314,22 +548,27 @@ async function startServer() {
   // Messages: List for forum
   app.get('/api/forums/:id/messages', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
-    const accessResult = await db.execute({
-      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
-      args: [forumId, req.user.id, req.user.id]
-    });
-    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+    const access = await checkForumAccess(forumId, req.user.id);
+    if (!access.hasAccess) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
-    const messagesResult = await db.execute({
-      sql: `
+    let sql = `
       SELECT m.*, u.username, u.email, u.profile_picture 
       FROM messages m 
       JOIN users u ON m.user_id = u.id 
       WHERE m.forum_id = ? 
-      ORDER BY m.created_at ASC
-    `,
-      args: [forumId]
-    });
+    `;
+    const args: any[] = [forumId];
+
+    if (access.role === 'kicked' && access.kicked_at) {
+      sql += ` AND m.created_at <= ?`;
+      args.push(access.kicked_at);
+    }
+
+    sql += ` ORDER BY m.created_at ASC`;
+
+    const messagesResult = await db.execute({ sql, args });
     res.json(messagesResult.rows);
   });
 
@@ -339,11 +578,10 @@ async function startServer() {
     const { content, parent_id } = req.body;
     if (!content) return res.status(400).json({ error: 'Content required' });
 
-    const accessResult = await db.execute({
-      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
-      args: [forumId, req.user.id, req.user.id]
-    });
-    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+    const access = await checkForumAccess(forumId, req.user.id);
+    if (!access.hasAccess || access.role === 'kicked') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     const stmt = await db.execute({
       sql: 'INSERT INTO messages (forum_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)',
@@ -362,11 +600,8 @@ async function startServer() {
       });
       const mentionedUser = mentionedUserResult.rows[0] as any;
       if (mentionedUser) {
-        const hasAccessResult = await db.execute({
-          sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
-          args: [forumId, mentionedUser.id, mentionedUser.id]
-        });
-        if (hasAccessResult.rows.length > 0) {
+        const access = await checkForumAccess(forumId, mentionedUser.id);
+        if (access.hasAccess && access.role !== 'kicked') {
           await db.execute({
             sql: 'INSERT INTO mentions (message_id, user_id, forum_id) VALUES (?, ?, ?)',
             args: [messageId, mentionedUser.id, forumId]
@@ -378,16 +613,55 @@ async function startServer() {
     res.json({ id: messageId?.toString() });
   });
 
+  // Messages: AI Counselor Filter
+  app.post('/api/analyze-message', authenticate, async (req: any, res) => {
+    const { content, forumId } = req.body;
+    if (!content || content.trim().length < 5) return res.json({ warning: null });
+
+    try {
+      const historyResult = await db.execute({
+        sql: 'SELECT content FROM messages WHERE forum_id = ? AND user_id = ? AND type = "user" ORDER BY created_at DESC LIMIT 5',
+        args: [forumId, req.user.id]
+      });
+      const history = historyResult.rows.map((r: any) => r.content).reverse().join('\n');
+
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const prompt = `You are a built-in counselor for a private chat forum.
+Your job is to read the user's drafted message and their recent history, and warn them if the drafted message is harmful, not nice, could be perceived as bad, or isn't a coherent sentence.
+If it's fine, return an empty string.
+If it needs a warning, return a short, helpful warning and a suggestion.
+Example: "That might be taken the wrong way! Try this: [suggestion]" or "Are you sure that's a coherent sentence? Try this: [suggestion]"
+
+Recent history:
+${history}
+
+Drafted message:
+${content}
+
+Return ONLY the warning text, or nothing if it's fine.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+      });
+
+      const warning = response.text?.trim() || null;
+      res.json({ warning: warning === '' ? null : warning });
+    } catch (err) {
+      console.error('AI Filter error:', err);
+      res.json({ warning: null });
+    }
+  });
+
   // Forums: AI Summary
   app.get('/api/forums/:id/summary', authenticate, async (req: any, res) => {
     const forumId = req.params.id;
     
     // Check access
-    const accessResult = await db.execute({
-      sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
-      args: [forumId, req.user.id, req.user.id]
-    });
-    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+    const access = await checkForumAccess(forumId, req.user.id);
+    if (!access.hasAccess) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     // Fetch forum details
     const forumResult = await db.execute({
@@ -397,16 +671,22 @@ async function startServer() {
     const forum = forumResult.rows[0] as any;
 
     // Fetch all messages
-    const messagesResult = await db.execute({
-      sql: `
+    let sql = `
       SELECT m.content, u.username, m.created_at
       FROM messages m 
       JOIN users u ON m.user_id = u.id 
       WHERE m.forum_id = ? 
-      ORDER BY m.created_at ASC
-    `,
-      args: [forumId]
-    });
+    `;
+    const args: any[] = [forumId];
+
+    if (access.role === 'kicked' && access.kicked_at) {
+      sql += ` AND m.created_at <= ?`;
+      args.push(access.kicked_at);
+    }
+
+    sql += ` ORDER BY m.created_at ASC`;
+
+    const messagesResult = await db.execute({ sql, args });
 
     if (messagesResult.rows.length === 0) {
       return res.json({ summary: "No messages in this forum yet to summarize." });
