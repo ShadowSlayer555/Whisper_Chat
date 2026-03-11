@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
-import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search, Info, X, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search, Info, X, AlertTriangle, CheckCircle2, ArrowDown } from 'lucide-react';
 import { format } from 'date-fns';
 import { UserMenu } from './UserMenu';
 import Markdown from 'react-markdown';
 
-const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, depth?: number }> = ({ msg, user, onReply, depth = 0 }) => {
+const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, depth?: number, replyingToId?: number | null, forum: any, canManage: boolean, onMarkSolution: (id: number) => void }> = ({ msg, user, onReply, depth = 0, replyingToId, forum, canManage, onMarkSolution }) => {
   const [collapsed, setCollapsed] = useState(false);
   const isMe = msg.user_id === user.id;
+  const isReplyingToThis = msg.id === replyingToId;
+  const isSolution = msg.id === forum?.solution_message_id;
 
   if (msg.type === 'system_kick') {
     return (
@@ -18,9 +20,11 @@ const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, 
     );
   }
 
+  const processedContent = msg.content.replace(/(@[a-zA-Z0-9_]+)/g, '**$1**');
+
   return (
-    <div className={`flex flex-col ${depth > 0 ? 'ml-4 sm:ml-8 mt-4 border-l-2 border-slate-200 pl-4' : 'mt-6'}`}>
-      <div className="flex items-start gap-3">
+    <div id={`message-${msg.id}`} className={`flex flex-col ${depth > 0 ? 'ml-4 sm:ml-8 mt-4 border-l-2 border-slate-200 pl-4' : 'mt-6'}`}>
+      <div className={`flex items-start gap-3 p-2 rounded-xl transition-colors ${isReplyingToThis ? 'bg-indigo-50 ring-2 ring-indigo-200' : ''} ${isSolution ? 'bg-emerald-50 ring-2 ring-emerald-200' : ''}`}>
         <div className="shrink-0 group relative mt-1">
           <img src={msg.profile_picture} alt={msg.username} className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300" />
           <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs p-2 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-10">
@@ -47,35 +51,42 @@ const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, 
             )}
           </div>
           
-          {!collapsed && (
-            <>
-              <div className="text-slate-800 text-sm whitespace-pre-wrap break-words leading-relaxed bg-white p-3 rounded-2xl rounded-tl-sm border border-slate-200 shadow-sm inline-block">
-                {msg.content.split(/(@[a-zA-Z0-9_]+)/).map((part: string, i: number) => 
-                  part.startsWith('@') ? (
-                    <span key={i} className="font-medium text-indigo-600">{part}</span>
-                  ) : (
-                    <span key={i}>{part}</span>
-                  )
-                )}
-              </div>
-              <div className="mt-2 flex items-center gap-4">
-                <button
-                  onClick={() => onReply(msg)}
-                  className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors"
-                >
-                  <Reply size={14} />
-                  Reply
-                </button>
-              </div>
-            </>
-          )}
+          <div className={`text-slate-800 text-sm whitespace-pre-wrap break-words leading-relaxed p-3 rounded-2xl rounded-tl-sm border shadow-sm inline-block ${isSolution ? 'bg-white border-emerald-300' : isReplyingToThis ? 'bg-white border-indigo-200' : 'bg-white border-slate-200'}`}>
+            <div className="[&>p]:mb-2 last:[&>p]:mb-0 [&>a]:text-indigo-600 [&>a]:underline [&>strong]:font-bold [&>em]:italic [&>ul]:list-disc [&>ul]:ml-4 [&>ol]:list-decimal [&>ol]:ml-4 [&>code]:bg-slate-100 [&>code]:px-1 [&>code]:rounded [&>pre]:bg-slate-800 [&>pre]:text-white [&>pre]:p-2 [&>pre]:rounded-lg">
+              <Markdown>{processedContent}</Markdown>
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-4">
+            <button
+              onClick={() => onReply(msg)}
+              className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors"
+            >
+              <Reply size={14} />
+              Reply
+            </button>
+            {canManage && !isSolution && (
+              <button
+                onClick={() => onMarkSolution(msg.id)}
+                className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-emerald-600 transition-colors"
+              >
+                <CheckCircle2 size={14} />
+                Mark Solution
+              </button>
+            )}
+            {isSolution && (
+              <span className="flex items-center gap-1 text-xs font-bold text-emerald-600">
+                <CheckCircle2 size={14} />
+                Solution
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       {!collapsed && msg.children && msg.children.length > 0 && (
         <div className="flex flex-col">
           {msg.children.map((child: any) => (
-            <MessageNode key={child.id} msg={child} user={user} onReply={onReply} depth={depth + 1} />
+            <MessageNode key={child.id} msg={child} user={user} onReply={onReply} depth={depth + 1} replyingToId={replyingToId} forum={forum} canManage={canManage} onMarkSolution={onMarkSolution} />
           ))}
         </div>
       )}
@@ -106,7 +117,11 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
     loadForum();
     loadMessages();
     markMentionsRead();
-    const interval = setInterval(loadMessages, 5000); // Poll for new messages
+    markForumRead();
+    const interval = setInterval(() => {
+      loadMessages();
+      markForumRead();
+    }, 5000); // Poll for new messages
     return () => clearInterval(interval);
   }, [id]);
 
@@ -150,6 +165,33 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
     try {
       await fetchApi(`/api/forums/${id}/mentions/read`, { method: 'POST' });
     } catch (err) {}
+  };
+
+  const markForumRead = async () => {
+    try {
+      await fetchApi(`/api/forums/${id}/read`, { method: 'POST' });
+    } catch (err) {}
+  };
+
+  const handleMarkSolution = async (messageId: number) => {
+    try {
+      await fetchApi(`/api/forums/${id}/solution`, {
+        method: 'POST',
+        body: JSON.stringify({ messageId })
+      });
+      loadForum();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const scrollToSolution = () => {
+    if (forum?.solution_message_id) {
+      const el = document.getElementById(`message-${forum.solution_message_id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
   };
 
   const handleInvite = async (e: React.FormEvent) => {
@@ -281,6 +323,8 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
 
   const isCreator = forum.creator_id === user.id;
 
+  const canManage = forum?.userRole === 'admin' || forum?.userRole === 'creator';
+
   return (
     <div className="max-w-5xl mx-auto h-screen flex flex-col bg-slate-50 relative">
       {/* Header */}
@@ -289,9 +333,16 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
           <button onClick={() => navigate(forum.office_id ? `/office/${forum.office_id}` : '/')} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
             <ArrowLeft size={20} className="text-slate-600" />
           </button>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">{forum.title}</h1>
-            <p className="text-sm text-slate-500">{forum.description}</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">{forum.title}</h1>
+              <p className="text-sm text-slate-500">{forum.description}</p>
+            </div>
+            {forum?.solution_message_id && (
+              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-600" title="This forum has a solution">
+                <CheckCircle2 size={20} />
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -322,7 +373,7 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
             <div className="text-center py-12 text-slate-500">No messages yet. Start the conversation!</div>
           ) : (
             threadedMessages.map((msg) => (
-              <MessageNode key={msg.id} msg={msg} user={user} onReply={setReplyingTo} />
+              <MessageNode key={msg.id} msg={msg} user={user} onReply={setReplyingTo} replyingToId={replyingTo?.id} forum={forum} canManage={canManage} onMarkSolution={handleMarkSolution} />
             ))
           )}
         </div>
@@ -330,7 +381,16 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
 
       {/* Input Area */}
       {!isArchived && (
-        <div className="bg-white border-t border-slate-200 p-4 shrink-0">
+        <div className="bg-white border-t border-slate-200 p-4 shrink-0 relative">
+          {forum?.solution_message_id && (
+            <button
+              onClick={scrollToSolution}
+              className="absolute bottom-full mb-4 left-6 flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-700 font-medium rounded-full shadow-md hover:bg-emerald-200 transition-colors z-10"
+            >
+              <ArrowDown size={16} />
+              Scroll down to solution
+            </button>
+          )}
           <div className="max-w-4xl mx-auto relative">
             {aiWarning && (
               <div className="absolute bottom-full mb-3 left-0 right-0 bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl shadow-lg text-sm flex items-start gap-2 animate-in fade-in slide-in-from-bottom-2 z-20">
@@ -340,11 +400,11 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
             )}
             {replyingTo && (
               <div className="mb-2 flex items-center justify-between bg-slate-50 border border-slate-200 p-2 rounded-lg text-sm">
-                <div className="flex items-center gap-2 text-slate-600">
-                  <Reply size={16} />
-                  <span>Replying to <span className="font-medium">{replyingTo.username}</span></span>
+                <div className="flex items-center gap-2 text-slate-600 overflow-hidden">
+                  <Reply size={16} className="shrink-0" />
+                  <span className="truncate">Replying to <span className="font-medium">{replyingTo.username}</span>: <span className="italic">"{replyingTo.content}"</span></span>
                 </div>
-                <button onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-slate-600">×</button>
+                <button onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-slate-600 shrink-0 ml-2">×</button>
               </div>
             )}
 

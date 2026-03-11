@@ -333,8 +333,14 @@ async function startServer() {
     }
 
     const forumsResult = await db.execute({
-      sql: 'SELECT * FROM forums WHERE office_id = ? ORDER BY created_at DESC',
-      args: [officeId]
+      sql: `
+        SELECT f.*, 
+               (SELECT COUNT(*) FROM messages m WHERE m.forum_id = f.id AND m.created_at > COALESCE((SELECT last_read_at FROM forum_read_states frs WHERE frs.forum_id = f.id AND frs.user_id = ?), '1970-01-01')) as unread_count
+        FROM forums f 
+        WHERE f.office_id = ? 
+        ORDER BY f.created_at DESC
+      `,
+      args: [req.user.id, officeId]
     });
 
     const membersResult = await db.execute({
@@ -428,6 +434,27 @@ async function startServer() {
 
     await db.execute({
       sql: "UPDATE office_members SET role = 'admin' WHERE office_id = ? AND user_id = ? AND role = 'member'",
+      args: [officeId, targetUserId]
+    });
+
+    res.json({ success: true });
+  });
+
+  // Offices: Demote admin
+  app.post('/api/offices/:id/members/:userId/demote', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    const targetUserId = req.params.userId;
+
+    const accessResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, req.user.id]
+    });
+    if (accessResult.rows.length === 0 || (accessResult.rows[0].role !== 'creator' && accessResult.rows[0].role !== 'admin')) {
+      return res.status(403).json({ error: 'Only admins can demote members' });
+    }
+
+    await db.execute({
+      sql: "UPDATE office_members SET role = 'member' WHERE office_id = ? AND user_id = ? AND role = 'admin'",
       args: [officeId, targetUserId]
     });
 
@@ -696,7 +723,68 @@ async function startServer() {
       sql: 'SELECT f.*, u.username as creator_username FROM forums f JOIN users u ON f.creator_id = u.id WHERE f.id = ?',
       args: [forumId]
     });
-    res.json(forumResult.rows[0]);
+    
+    let userRole = 'member';
+    if (forumResult.rows[0].office_id) {
+      const roleResult = await db.execute({
+        sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+        args: [forumResult.rows[0].office_id, req.user.id]
+      });
+      if (roleResult.rows.length > 0) {
+        userRole = roleResult.rows[0].role as string;
+      }
+    } else if (forumResult.rows[0].creator_id === req.user.id) {
+      userRole = 'creator';
+    }
+
+    res.json({ ...forumResult.rows[0], userRole });
+  });
+
+  // Forums: Mark as read
+  app.post('/api/forums/:id/read', authenticate, async (req: any, res) => {
+    try {
+      await db.execute({
+        sql: `
+          INSERT INTO forum_read_states (user_id, forum_id, last_read_at)
+          VALUES (?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(user_id, forum_id) DO UPDATE SET last_read_at = CURRENT_TIMESTAMP
+        `,
+        args: [req.user.id, req.params.id]
+      });
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to update read state' });
+    }
+  });
+
+  // Forums: Mark solution
+  app.post('/api/forums/:id/solution', authenticate, async (req: any, res) => {
+    const { messageId } = req.body;
+    const forumId = req.params.id;
+
+    const forumRes = await db.execute({ sql: 'SELECT office_id, creator_id FROM forums WHERE id = ?', args: [forumId] });
+    if (forumRes.rows.length === 0) return res.status(404).json({error: 'Not found'});
+    const forum = forumRes.rows[0];
+    
+    let canManage = false;
+    if (forum.office_id) {
+      const accessRes = await db.execute({ sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?', args: [forum.office_id, req.user.id] });
+      if (accessRes.rows.length > 0 && (accessRes.rows[0].role === 'admin' || accessRes.rows[0].role === 'creator')) {
+        canManage = true;
+      }
+    } else if (forum.creator_id === req.user.id) {
+      canManage = true;
+    }
+
+    if (!canManage) {
+      return res.status(403).json({error: 'Only admins can mark solutions'});
+    }
+
+    await db.execute({
+      sql: 'UPDATE forums SET solution_message_id = ? WHERE id = ?',
+      args: [messageId, forumId]
+    });
+    res.json({ success: true });
   });
 
   // Forums: Invite user

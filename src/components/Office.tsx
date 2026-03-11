@@ -79,6 +79,18 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
     }
   };
 
+  const handleDemote = async (userId: string) => {
+    if (!confirm('Are you sure you want to demote this user to a regular member?')) return;
+    try {
+      await fetchApi(`/api/offices/${id}/members/${userId}/demote`, {
+        method: 'POST',
+      });
+      loadOffice();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const handleKick = async (userId: string) => {
     if (!confirm('Are you sure you want to kick this user?')) return;
     try {
@@ -278,10 +290,19 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
                 <Link
                   key={forum.id}
                   to={`/forum/${forum.id}`}
-                  className="block bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all"
+                  className="block bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all flex justify-between items-center"
                 >
-                  <h3 className="text-lg font-semibold text-slate-900">{forum.title}</h3>
-                  <p className="text-slate-500 text-sm mt-1 line-clamp-2">{forum.description}</p>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                      {forum.title}
+                      {forum.unread_count > 0 && (
+                        <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          {forum.unread_count} new
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-slate-500 text-sm mt-1 line-clamp-2">{forum.description}</p>
+                  </div>
                 </Link>
               ))
             )}
@@ -331,7 +352,7 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
                         {(member.role === 'creator' || member.role === 'admin') && (
                           <div className="group relative flex items-center">
                             <Crown size={14} className="text-amber-500" />
-                            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs p-2 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-10">
+                            <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-slate-900 text-white text-xs p-2 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50">
                               This person is an admin/creator and may add people to the group.
                             </div>
                           </div>
@@ -356,11 +377,19 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
                           Make Admin
                         </button>
                       )}
+                      {member.role === 'admin' && (
+                        <button
+                          onClick={() => handleDemote(member.id)}
+                          className="text-xs font-medium text-amber-600 hover:text-amber-800 px-2 py-1 rounded hover:bg-amber-50 transition-colors"
+                        >
+                          Demote
+                        </button>
+                      )}
                       <button
                         onClick={() => handleKick(member.id)}
                         className="text-xs font-medium text-red-600 hover:text-red-800 px-2 py-1 rounded hover:bg-red-50 transition-colors"
                       >
-                        {member.role === 'admin' || member.role === 'creator' ? 'Demote/Kick' : 'Kick'}
+                        Kick
                       </button>
                     </div>
                   )}
