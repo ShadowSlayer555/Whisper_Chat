@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
-import { ArrowLeft, Plus, Search, UserPlus, Crown, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Plus, Search, UserPlus, Crown, MessageSquare, HelpCircle, Loader2, Trash2, LogOut, CheckCircle2 } from 'lucide-react';
 import { UserMenu } from './UserMenu';
 
 export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUser: (u: any) => void, onLogout: () => void }) {
@@ -13,10 +13,19 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
   const [newForumTitle, setNewForumTitle] = useState('');
   const [newForumDesc, setNewForumDesc] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
+  const [showKickRequest, setShowKickRequest] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletionStatus, setDeletionStatus] = useState<any>(null);
 
   useEffect(() => {
     loadOffice();
   }, [id]);
+
+  useEffect(() => {
+    if (office?.kickRequestedBy) {
+      setShowKickRequest(true);
+    }
+  }, [office]);
 
   const loadOffice = async () => {
     try {
@@ -73,10 +82,72 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
   const handleKick = async (userId: string) => {
     if (!confirm('Are you sure you want to kick this user?')) return;
     try {
-      await fetchApi(`/api/offices/${id}/members/${userId}/kick`, {
+      const res = await fetchApi(`/api/offices/${id}/members/${userId}/kick`, {
         method: 'POST',
       });
+      if (res.requested) {
+        alert('A kick request has been sent to the admin.');
+      }
       loadOffice();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleKickResponse = async (action: 'resign' | 'reject') => {
+    try {
+      await fetchApi(`/api/offices/${id}/kick-response`, {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      });
+      setShowKickRequest(false);
+      if (action === 'resign') {
+        navigate('/');
+      } else {
+        loadOffice();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleResign = async () => {
+    if (!confirm('Are you sure you want to resign from this office? You will lose access.')) return;
+    try {
+      await fetchApi(`/api/offices/${id}/resign`, {
+        method: 'POST',
+      });
+      navigate('/');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const loadDeletionStatus = async () => {
+    try {
+      const data = await fetchApi(`/api/offices/${id}/deletion-status`);
+      setDeletionStatus(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteClick = () => {
+    loadDeletionStatus();
+    setShowDeleteModal(true);
+  };
+
+  const handleApproveDelete = async () => {
+    try {
+      const res = await fetchApi(`/api/offices/${id}/delete-approve`, {
+        method: 'POST',
+      });
+      if (res.archived) {
+        alert('Office has been archived/deleted.');
+        navigate('/');
+      } else {
+        loadDeletionStatus();
+      }
     } catch (err: any) {
       alert(err.message);
     }
@@ -84,7 +155,8 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
 
   if (!office) return <div className="p-8 text-center">Loading...</div>;
 
-  const canManage = office.userRole === 'creator' || office.userRole === 'admin';
+  const canManage = (office.userRole === 'creator' || office.userRole === 'admin') && office.status !== 'archived';
+  const isArchived = office.status === 'archived';
 
   const filteredForums = office.forums.filter((f: any) => 
     f.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -104,6 +176,24 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {canManage && (
+            <>
+              <button
+                onClick={handleDeleteClick}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                <Trash2 size={16} />
+                Delete Office
+              </button>
+              <button
+                onClick={handleResign}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <LogOut size={16} />
+                Resign
+              </button>
+            </>
+          )}
           <UserMenu user={user} onUpdate={onUpdateUser} onLogout={onLogout} />
         </div>
       </div>
@@ -123,7 +213,7 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
                   className="pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none w-48"
                 />
               </div>
-              {canManage && (
+              {canManage && !isArchived && (
                 <button
                   onClick={() => setIsCreatingForum(true)}
                   className="flex items-center gap-1 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-indigo-700 transition-colors"
@@ -204,17 +294,25 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
               <h2 className="text-lg font-bold text-slate-900">Members ({office.members.length})</h2>
             </div>
             
-            {canManage && (
+            {canManage && !isArchived && (
               <div className="p-4 border-b border-slate-200 bg-slate-50">
                 <form onSubmit={handleInvite} className="flex items-center gap-2">
-                  <input
-                    type="email"
-                    placeholder="Invite by email"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    className="flex-1 px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                    required
-                  />
+                  <div className="relative flex-1 flex items-center">
+                    <input
+                      type="text"
+                      placeholder="Invite by email(s)"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      className="w-full px-3 py-1.5 pr-8 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      required
+                    />
+                    <div className="absolute right-2 group/tooltip cursor-help">
+                      <HelpCircle size={14} className="text-slate-400 hover:text-slate-600" />
+                      <div className="absolute bottom-full right-0 mb-2 w-48 bg-slate-900 text-white text-xs p-2 rounded-lg opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-10">
+                        You can enter a single email, or a list of emails separated by spaces.
+                      </div>
+                    </div>
+                  </div>
                   <button type="submit" className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors" title="Invite User">
                     <UserPlus size={18} />
                   </button>
@@ -238,23 +336,31 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
                             </div>
                           </div>
                         )}
+                        {member.kick_requested_by && (
+                          <span className="text-xs text-red-500 flex items-center gap-1 ml-2">
+                            <Loader2 size={12} className="animate-spin" />
+                            Awaiting approval
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-slate-500">{member.email}</div>
                     </div>
                   </div>
-                  {canManage && member.role === 'member' && (
+                  {canManage && member.id !== user.id && !isArchived && (
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => handlePromote(member.id)}
-                        className="text-xs font-medium text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
-                      >
-                        Make Admin
-                      </button>
+                      {member.role === 'member' && (
+                        <button
+                          onClick={() => handlePromote(member.id)}
+                          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
+                        >
+                          Make Admin
+                        </button>
+                      )}
                       <button
                         onClick={() => handleKick(member.id)}
                         className="text-xs font-medium text-red-600 hover:text-red-800 px-2 py-1 rounded hover:bg-red-50 transition-colors"
                       >
-                        Kick
+                        {member.role === 'admin' || member.role === 'creator' ? 'Demote/Kick' : 'Kick'}
                       </button>
                     </div>
                   )}
@@ -264,6 +370,82 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
           </div>
         </div>
       </div>
+
+      {/* Kick Request Modal */}
+      {showKickRequest && office.kickRequestedBy && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl">
+            <h2 className="text-xl font-bold text-slate-900 mb-2">Kick Request</h2>
+            <p className="text-slate-600 mb-6">
+              <span className="font-semibold">{office.members.find((m: any) => m.id === office.kickRequestedBy)?.username || 'Another admin'}</span> is attempting to kick you from this office. If you resign, you will no longer be part of the office.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => handleKickResponse('reject')}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Reject
+              </button>
+              <button
+                onClick={() => handleKickResponse('resign')}
+                className="px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors"
+              >
+                Resign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Office Modal */}
+      {showDeleteModal && deletionStatus && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl">
+            <h2 className="text-xl font-bold text-slate-900 mb-2">Delete Office</h2>
+            <p className="text-slate-600 mb-4 text-sm">
+              Deleting an office requires approval from all admins. Once all admins agree, the group is permanently deleted for everyone except the creator (who will see it in Archives).
+            </p>
+            
+            <div className="bg-slate-50 rounded-xl p-4 mb-6">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">Admin Approvals</h3>
+              <div className="space-y-2">
+                {deletionStatus.admins.map((admin: any) => {
+                  const hasApproved = deletionStatus.approvedUserIds.includes(admin.id);
+                  return (
+                    <div key={admin.id} className="flex items-center justify-between text-sm">
+                      <span className="text-slate-700">{admin.username}</span>
+                      {hasApproved ? (
+                        <span className="flex items-center gap-1 text-emerald-600 text-xs font-medium">
+                          <CheckCircle2 size={14} /> Approved
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-xs">Pending</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              {!deletionStatus.approvedUserIds.includes(user.id) && (
+                <button
+                  onClick={handleApproveDelete}
+                  className="px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors"
+                >
+                  Approve Deletion
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

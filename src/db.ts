@@ -92,4 +92,15 @@ export const initDb = async () => {
   try { await db.execute('ALTER TABLE forums ADD COLUMN office_id INTEGER REFERENCES offices(id)'); } catch (e) {}
   try { await db.execute('ALTER TABLE office_members ADD COLUMN kicked_at DATETIME'); } catch (e) {}
   try { await db.execute("ALTER TABLE messages ADD COLUMN type TEXT DEFAULT 'user'"); } catch (e) {}
+  try { await db.execute("ALTER TABLE offices ADD COLUMN status TEXT DEFAULT 'active'"); } catch (e) {}
+  try { await db.execute("ALTER TABLE office_members ADD COLUMN kick_requested_by INTEGER REFERENCES users(id)"); } catch (e) {}
+  try { 
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS office_deletion_approvals (
+        office_id INTEGER REFERENCES offices(id),
+        user_id INTEGER REFERENCES users(id),
+        PRIMARY KEY (office_id, user_id)
+      )
+    `);
+  } catch (e) {}
 };

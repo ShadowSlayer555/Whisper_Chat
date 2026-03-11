@@ -242,14 +242,27 @@ async function startServer() {
     const forum = forumResult.rows[0] as any;
 
     if (forum.office_id) {
+      const officeResult = await db.execute({
+        sql: 'SELECT status, creator_id FROM offices WHERE id = ?',
+        args: [forum.office_id]
+      });
+      const office = officeResult.rows[0] as any;
+
       const accessResult = await db.execute({
         sql: 'SELECT role, kicked_at FROM office_members WHERE office_id = ? AND user_id = ?',
         args: [forum.office_id, userId]
       });
       if (accessResult.rows.length > 0) {
+        const role = accessResult.rows[0].role;
+        if (role === 'kicked') return { hasAccess: false };
+        
+        if (office.status === 'archived' && office.creator_id !== userId) {
+          return { hasAccess: false };
+        }
+
         return { 
           hasAccess: true, 
-          role: accessResult.rows[0].role, 
+          role: role, 
           kicked_at: accessResult.rows[0].kicked_at 
         };
       }
@@ -289,10 +302,10 @@ async function startServer() {
         SELECT o.*, om.role 
         FROM offices o
         JOIN office_members om ON o.id = om.office_id
-        WHERE om.user_id = ?
+        WHERE om.user_id = ? AND om.role != 'kicked' AND (o.status = 'active' OR (o.status = 'archived' AND o.creator_id = ?))
         ORDER BY o.created_at DESC
       `,
-      args: [req.user.id]
+      args: [req.user.id, req.user.id]
     });
     res.json(result.rows);
   });
@@ -302,17 +315,22 @@ async function startServer() {
     const officeId = req.params.id;
     
     const accessResult = await db.execute({
-      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      sql: 'SELECT role, kick_requested_by FROM office_members WHERE office_id = ? AND user_id = ?',
       args: [officeId, req.user.id]
     });
-    if (accessResult.rows.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (accessResult.rows.length === 0 || accessResult.rows[0].role === 'kicked') return res.status(403).json({ error: 'Access denied' });
     const userRole = accessResult.rows[0].role;
+    const kickRequestedBy = accessResult.rows[0].kick_requested_by;
 
     const officeResult = await db.execute({
       sql: 'SELECT * FROM offices WHERE id = ?',
       args: [officeId]
     });
-    const office = officeResult.rows[0];
+    const office = officeResult.rows[0] as any;
+
+    if (office.status === 'archived' && office.creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     const forumsResult = await db.execute({
       sql: 'SELECT * FROM forums WHERE office_id = ? ORDER BY created_at DESC',
@@ -321,7 +339,8 @@ async function startServer() {
 
     const membersResult = await db.execute({
       sql: `
-        SELECT u.id, u.username, u.email, u.profile_picture, om.role
+        SELECT u.id, u.username, u.email, u.profile_picture, om.role, om.kick_requested_by,
+               (SELECT username FROM users WHERE id = om.kick_requested_by) as kick_requester_name
         FROM users u
         JOIN office_members om ON u.id = om.user_id
         WHERE om.office_id = ? AND om.role != 'kicked'
@@ -332,6 +351,7 @@ async function startServer() {
     res.json({
       ...office,
       userRole,
+      kickRequestedBy,
       forums: forumsResult.rows,
       members: membersResult.rows
     });
@@ -350,37 +370,46 @@ async function startServer() {
       return res.status(403).json({ error: 'Only admins can invite members' });
     }
 
-    const userResult = await db.execute({
-      sql: 'SELECT id FROM users WHERE email = ?',
-      args: [email]
-    });
-    if (userResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    const targetUserId = userResult.rows[0].id;
+    const emails = email.split(' ').filter((e: string) => e.trim() !== '');
+    let invitedCount = 0;
 
-    const existingResult = await db.execute({
-      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
-      args: [officeId, targetUserId]
-    });
-
-    if (existingResult.rows.length > 0) {
-      if (existingResult.rows[0].role === 'kicked') {
-        await db.execute({
-          sql: "UPDATE office_members SET role = 'member', kicked_at = NULL WHERE office_id = ? AND user_id = ?",
+    for (const e of emails) {
+      const userResult = await db.execute({
+        sql: 'SELECT id FROM users WHERE email = ?',
+        args: [e.trim()]
+      });
+      if (userResult.rows.length > 0) {
+        const targetUserId = userResult.rows[0].id;
+        
+        const existingResult = await db.execute({
+          sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
           args: [officeId, targetUserId]
         });
-        return res.json({ success: true });
+
+        if (existingResult.rows.length > 0) {
+          if (existingResult.rows[0].role === 'kicked') {
+            await db.execute({
+              sql: "UPDATE office_members SET role = 'member', kicked_at = NULL WHERE office_id = ? AND user_id = ?",
+              args: [officeId, targetUserId]
+            });
+            invitedCount++;
+          }
+        } else {
+          try {
+            await db.execute({
+              sql: 'INSERT INTO office_members (office_id, user_id, role) VALUES (?, ?, ?)',
+              args: [officeId, targetUserId, 'member']
+            });
+            invitedCount++;
+          } catch (err) {}
+        }
       }
-      return res.status(400).json({ error: 'User already in office' });
     }
 
-    try {
-      await db.execute({
-        sql: 'INSERT INTO office_members (office_id, user_id, role) VALUES (?, ?, ?)',
-        args: [officeId, targetUserId, 'member']
-      });
-      res.json({ success: true });
-    } catch (err) {
-      res.status(400).json({ error: 'User already in office' });
+    if (invitedCount > 0) {
+      res.json({ success: true, count: invitedCount });
+    } else {
+      res.status(400).json({ error: 'No valid users found or already in office' });
     }
   });
 
@@ -418,6 +447,21 @@ async function startServer() {
       return res.status(403).json({ error: 'Only admins can kick members' });
     }
 
+    const targetAccessResult = await db.execute({
+      sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+      args: [officeId, targetUserId]
+    });
+    if (targetAccessResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    const targetRole = targetAccessResult.rows[0].role;
+    if (targetRole === 'admin' || targetRole === 'creator') {
+      await db.execute({
+        sql: "UPDATE office_members SET kick_requested_by = ? WHERE office_id = ? AND user_id = ?",
+        args: [req.user.id, officeId, targetUserId]
+      });
+      return res.json({ success: true, requested: true });
+    }
+
     const targetUserResult = await db.execute({
       sql: 'SELECT username FROM users WHERE id = ?',
       args: [targetUserId]
@@ -429,22 +473,162 @@ async function startServer() {
       args: [officeId, targetUserId]
     });
 
-    const forumsResult = await db.execute({
-      sql: 'SELECT id FROM forums WHERE office_id = ?',
-      args: [officeId]
-    });
+    res.json({ success: true });
+  });
 
-    const now = new Date().toLocaleString();
-    const kickMessage = `${targetUsername} was kicked from the group on ${now}. They can no longer see new messages.`;
+  // Offices: Respond to kick request
+  app.post('/api/offices/:id/kick-response', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    const { action } = req.body; // 'resign' | 'reject'
 
-    for (const forum of forumsResult.rows) {
+    if (action === 'resign') {
       await db.execute({
-        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_kick')",
-        args: [forum.id, req.user.id, kickMessage]
+        sql: "UPDATE office_members SET role = 'kicked', kick_requested_by = NULL, kicked_at = CURRENT_TIMESTAMP WHERE office_id = ? AND user_id = ?",
+        args: [officeId, req.user.id]
+      });
+    } else if (action === 'reject') {
+      await db.execute({
+        sql: "UPDATE office_members SET kick_requested_by = NULL WHERE office_id = ? AND user_id = ?",
+        args: [officeId, req.user.id]
       });
     }
 
     res.json({ success: true });
+  });
+
+  // Offices: Resign
+  app.post('/api/offices/:id/resign', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    await db.execute({
+      sql: "UPDATE office_members SET role = 'kicked', kick_requested_by = NULL, kicked_at = CURRENT_TIMESTAMP WHERE office_id = ? AND user_id = ?",
+      args: [officeId, req.user.id]
+    });
+    res.json({ success: true });
+  });
+
+  // Offices: Get deletion status
+  app.get('/api/offices/:id/deletion-status', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    
+    const adminsResult = await db.execute({
+      sql: "SELECT u.id, u.username FROM users u JOIN office_members om ON u.id = om.user_id WHERE om.office_id = ? AND om.role IN ('admin', 'creator')",
+      args: [officeId]
+    });
+    
+    const approvalsResult = await db.execute({
+      sql: "SELECT user_id FROM office_deletion_approvals WHERE office_id = ?",
+      args: [officeId]
+    });
+    
+    const approvedUserIds = approvalsResult.rows.map((r: any) => r.user_id);
+    
+    res.json({
+      admins: adminsResult.rows,
+      approvedUserIds
+    });
+  });
+
+  // Offices: Approve deletion
+  app.post('/api/offices/:id/delete-approve', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    
+    await db.execute({
+      sql: "INSERT OR IGNORE INTO office_deletion_approvals (office_id, user_id) VALUES (?, ?)",
+      args: [officeId, req.user.id]
+    });
+    
+    const adminsResult = await db.execute({
+      sql: "SELECT user_id FROM office_members WHERE office_id = ? AND role IN ('admin', 'creator')",
+      args: [officeId]
+    });
+    
+    const approvalsResult = await db.execute({
+      sql: "SELECT user_id FROM office_deletion_approvals WHERE office_id = ?",
+      args: [officeId]
+    });
+    
+    const adminIds = adminsResult.rows.map((r: any) => r.user_id);
+    const approvedIds = approvalsResult.rows.map((r: any) => r.user_id);
+    
+    const allApproved = adminIds.every(id => approvedIds.includes(id));
+    
+    if (allApproved) {
+      await db.execute({
+        sql: "UPDATE offices SET status = 'archived' WHERE id = ?",
+        args: [officeId]
+      });
+    }
+    
+    res.json({ success: true, archived: allApproved });
+  });
+
+  // Offices: Reactivate
+  app.post('/api/offices/:id/reactivate', authenticate, async (req: any, res) => {
+    const officeId = req.params.id;
+    const { email } = req.body;
+    
+    const officeResult = await db.execute({
+      sql: "SELECT creator_id FROM offices WHERE id = ?",
+      args: [officeId]
+    });
+    
+    if (officeResult.rows[0].creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'Only creator can reactivate' });
+    }
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Must invite at least one member' });
+    }
+    
+    const emails = email.split(' ').filter((e: string) => e.trim() !== '');
+    let invitedCount = 0;
+
+    for (const e of emails) {
+      const userResult = await db.execute({
+        sql: 'SELECT id FROM users WHERE email = ?',
+        args: [e.trim()]
+      });
+      if (userResult.rows.length > 0) {
+        const targetUserId = userResult.rows[0].id;
+        
+        const existingResult = await db.execute({
+          sql: 'SELECT role FROM office_members WHERE office_id = ? AND user_id = ?',
+          args: [officeId, targetUserId]
+        });
+
+        if (existingResult.rows.length > 0) {
+          if (existingResult.rows[0].role === 'kicked') {
+            await db.execute({
+              sql: "UPDATE office_members SET role = 'member', kicked_at = NULL WHERE office_id = ? AND user_id = ?",
+              args: [officeId, targetUserId]
+            });
+            invitedCount++;
+          }
+        } else {
+          try {
+            await db.execute({
+              sql: 'INSERT INTO office_members (office_id, user_id, role) VALUES (?, ?, ?)',
+              args: [officeId, targetUserId, 'member']
+            });
+            invitedCount++;
+          } catch (err) {}
+        }
+      }
+    }
+    
+    if (invitedCount > 0) {
+      await db.execute({
+        sql: "UPDATE offices SET status = 'active' WHERE id = ?",
+        args: [officeId]
+      });
+      await db.execute({
+        sql: "DELETE FROM office_deletion_approvals WHERE office_id = ?",
+        args: [officeId]
+      });
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: 'No valid users found to invite' });
+    }
   });
 
   // Offices: Create Forum
