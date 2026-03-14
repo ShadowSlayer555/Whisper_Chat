@@ -48,6 +48,7 @@ export const initDb = async () => {
       description TEXT,
       creator_id INTEGER NOT NULL,
       office_id INTEGER,
+      active_call_type TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id),
       FOREIGN KEY (office_id) REFERENCES offices(id)
@@ -95,6 +96,7 @@ export const initDb = async () => {
   try { await db.execute("ALTER TABLE offices ADD COLUMN status TEXT DEFAULT 'active'"); } catch (e) {}
   try { await db.execute("ALTER TABLE office_members ADD COLUMN kick_requested_by INTEGER REFERENCES users(id)"); } catch (e) {}
   try { await db.execute("ALTER TABLE forums ADD COLUMN solution_message_id INTEGER REFERENCES messages(id)"); } catch (e) {}
+  try { await db.execute("ALTER TABLE forums ADD COLUMN active_call_type TEXT"); } catch (e) {}
   try { 
     await db.execute(`
       CREATE TABLE IF NOT EXISTS office_deletion_approvals (

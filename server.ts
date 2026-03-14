@@ -913,7 +913,7 @@ async function startServer() {
 
     try {
       const historyResult = await db.execute({
-        sql: 'SELECT content FROM messages WHERE forum_id = ? AND user_id = ? AND type = "user" ORDER BY created_at DESC LIMIT 5',
+        sql: "SELECT content FROM messages WHERE forum_id = ? AND user_id = ? AND type = 'user' ORDER BY created_at DESC LIMIT 5",
         args: [forumId, req.user.id]
       });
       const history = historyResult.rows.map((r: any) => r.content).reverse().join('\n');
