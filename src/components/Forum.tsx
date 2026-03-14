@@ -114,6 +114,7 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
   const [aiWarning, setAiWarning] = useState<string | null>(null);
   const [isArchived, setIsArchived] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadForum();
