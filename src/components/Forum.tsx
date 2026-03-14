@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { UserMenu } from './UserMenu';
 import Markdown from 'react-markdown';
 import { CallPanel } from './CallPanel';
+import toast from 'react-hot-toast';
 
 const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, depth?: number, replyingToId?: number | null, forum: any, canManage: boolean, onMarkSolution: (id: number) => void }> = ({ msg, user, onReply, depth = 0, replyingToId, forum, canManage, onMarkSolution }) => {
   const [collapsed, setCollapsed] = useState(false);
@@ -184,7 +185,7 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
       });
       loadForum();
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -205,9 +206,9 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
         body: JSON.stringify({ email: inviteEmail }),
       });
       setInviteEmail('');
-      alert('User invited successfully');
+      toast.success('User invited successfully');
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 

@@ -1,4 +1,5 @@
 import express from 'express';
+import 'express-async-errors';
 import { createServer as createViteServer } from 'vite';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -521,6 +522,17 @@ async function startServer() {
       args: [officeId, targetUserId]
     });
 
+    const forumsResult = await db.execute({
+      sql: 'SELECT id FROM forums WHERE office_id = ?',
+      args: [officeId]
+    });
+    for (const forum of forumsResult.rows) {
+      await db.execute({
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_kick')",
+        args: [forum.id, targetUserId, `${targetUsername} has been kicked from the office.`]
+      });
+    }
+
     res.json({ success: true });
   });
 
@@ -534,6 +546,23 @@ async function startServer() {
         sql: "UPDATE office_members SET role = 'kicked', kick_requested_by = NULL, kicked_at = CURRENT_TIMESTAMP WHERE office_id = ? AND user_id = ?",
         args: [officeId, req.user.id]
       });
+
+      const targetUserResult = await db.execute({
+        sql: 'SELECT username FROM users WHERE id = ?',
+        args: [req.user.id]
+      });
+      const targetUsername = targetUserResult.rows[0]?.username;
+
+      const forumsResult = await db.execute({
+        sql: 'SELECT id FROM forums WHERE office_id = ?',
+        args: [officeId]
+      });
+      for (const forum of forumsResult.rows) {
+        await db.execute({
+          sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_kick')",
+          args: [forum.id, req.user.id, `${targetUsername} has resigned from the office.`]
+        });
+      }
     } else if (action === 'reject') {
       await db.execute({
         sql: "UPDATE office_members SET kick_requested_by = NULL WHERE office_id = ? AND user_id = ?",
@@ -551,6 +580,24 @@ async function startServer() {
       sql: "UPDATE office_members SET role = 'kicked', kick_requested_by = NULL, kicked_at = CURRENT_TIMESTAMP WHERE office_id = ? AND user_id = ?",
       args: [officeId, req.user.id]
     });
+
+    const targetUserResult = await db.execute({
+      sql: 'SELECT username FROM users WHERE id = ?',
+      args: [req.user.id]
+    });
+    const targetUsername = targetUserResult.rows[0]?.username;
+
+    const forumsResult = await db.execute({
+      sql: 'SELECT id FROM forums WHERE office_id = ?',
+      args: [officeId]
+    });
+    for (const forum of forumsResult.rows) {
+      await db.execute({
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_kick')",
+        args: [forum.id, req.user.id, `${targetUsername} has resigned from the office.`]
+      });
+    }
+
     res.json({ success: true });
   });
 
@@ -1061,6 +1108,14 @@ Return ONLY the warning text, or nothing if it's fine.`;
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error('Unhandled error:', err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(500).json({ error: 'Internal server error' });
   });
 
   if (process.env.NODE_ENV !== 'production') {

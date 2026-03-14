@@ -3,6 +3,7 @@ import { fetchApi } from '../lib/api';
 import { Link, useNavigate } from 'react-router-dom';
 import { Building2, Plus, Search, MoreVertical, ArchiveRestore } from 'lucide-react';
 import { UserMenu } from './UserMenu';
+import toast from 'react-hot-toast';
 
 export function OfficeList({ user, onUpdateUser, onLogout }: { user: any, onUpdateUser: (u: any) => void, onLogout: () => void }) {
   const [offices, setOffices] = useState<any[]>([]);
@@ -56,8 +57,9 @@ export function OfficeList({ user, onUpdateUser, onLogout }: { user: any, onUpda
       setReactivateEmail('');
       loadOffices();
       setActiveTab('active');
+      toast.success('Office reactivated successfully');
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 

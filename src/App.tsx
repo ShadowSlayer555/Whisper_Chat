@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { Auth } from './components/Auth';
 import { OfficeList } from './components/OfficeList';
 import { Office } from './components/Office';
@@ -71,29 +72,32 @@ export default function App() {
   }
 
   return (
-    <HashRouter>
-      <Routes>
-        <Route 
-          path="/" 
-          element={
-            user ? (
-              <OfficeList user={user} onUpdateUser={setUser} onLogout={handleLogout} />
-            ) : showAuth ? (
-              <Auth onLogin={setUser} />
-            ) : (
-              <LandingPage onSignInClick={() => setShowAuth(true)} />
-            )
-          } 
-        />
-        <Route 
-          path="/office/:id" 
-          element={user ? <Office user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Navigate to="/" />} 
-        />
-        <Route 
-          path="/forum/:id" 
-          element={user ? <Forum user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Navigate to="/" />} 
-        />
-      </Routes>
-    </HashRouter>
+    <>
+      <Toaster position="top-center" />
+      <HashRouter>
+        <Routes>
+          <Route 
+            path="/" 
+            element={
+              user ? (
+                <OfficeList user={user} onUpdateUser={setUser} onLogout={handleLogout} />
+              ) : showAuth ? (
+                <Auth onLogin={setUser} />
+              ) : (
+                <LandingPage onSignInClick={() => setShowAuth(true)} />
+              )
+            } 
+          />
+          <Route 
+            path="/office/:id" 
+            element={user ? <Office user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Navigate to="/" />} 
+          />
+          <Route 
+            path="/forum/:id" 
+            element={user ? <Forum user={user} onUpdateUser={setUser} onLogout={handleLogout} /> : <Navigate to="/" />} 
+          />
+        </Routes>
+      </HashRouter>
+    </>
   );
 }

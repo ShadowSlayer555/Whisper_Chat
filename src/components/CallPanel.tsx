@@ -34,7 +34,6 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
-  const localVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -133,10 +132,6 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       });
       setLocalStream(stream);
       localStreamRef.current = stream;
-      
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
       
       // Update existing peers with new tracks
       Object.values(peersRef.current).forEach(peer => {
@@ -362,8 +357,8 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             className={`relative bg-slate-800 rounded-xl overflow-hidden aspect-video border-2 cursor-pointer transition-colors ${activeSpeakerId === 'local' ? 'border-indigo-500' : 'border-slate-700 hover:border-slate-600'}`}
             onClick={() => setIsFullscreen(true)}
           >
-            {callType === 'video' && !isVideoOff ? (
-              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+            {callType === 'video' && !isVideoOff && localStreamRef.current ? (
+              <VideoPlayer stream={localStreamRef.current} muted className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-slate-800">
                 <img src={user.profile_picture} alt="" className="w-16 h-16 rounded-full border-2 border-slate-600" />

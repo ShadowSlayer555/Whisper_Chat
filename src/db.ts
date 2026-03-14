@@ -28,6 +28,7 @@ export const initDb = async () => {
       name TEXT NOT NULL,
       description TEXT,
       creator_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'active',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id)
     );
@@ -36,10 +37,13 @@ export const initDb = async () => {
       office_id INTEGER NOT NULL,
       user_id INTEGER NOT NULL,
       role TEXT DEFAULT 'member',
+      kicked_at DATETIME,
+      kick_requested_by INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (office_id, user_id),
       FOREIGN KEY (office_id) REFERENCES offices(id),
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (kick_requested_by) REFERENCES users(id)
     );
 
     CREATE TABLE IF NOT EXISTS forums (
@@ -49,9 +53,11 @@ export const initDb = async () => {
       creator_id INTEGER NOT NULL,
       office_id INTEGER,
       active_call_type TEXT,
+      solution_message_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id),
-      FOREIGN KEY (office_id) REFERENCES offices(id)
+      FOREIGN KEY (office_id) REFERENCES offices(id),
+      FOREIGN KEY (solution_message_id) REFERENCES messages(id)
     );
 
     CREATE TABLE IF NOT EXISTS forum_invites (
@@ -68,6 +74,7 @@ export const initDb = async () => {
       user_id INTEGER NOT NULL,
       content TEXT NOT NULL,
       parent_id INTEGER,
+      type TEXT DEFAULT 'user',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (forum_id) REFERENCES forums(id),
       FOREIGN KEY (user_id) REFERENCES users(id),

@@ -3,6 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
 import { ArrowLeft, Plus, Search, UserPlus, Crown, MessageSquare, HelpCircle, Loader2, Trash2, LogOut, CheckCircle2, Video, Mic } from 'lucide-react';
 import { UserMenu } from './UserMenu';
+import toast from 'react-hot-toast';
+import { confirmAction } from '../lib/confirm';
 
 export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUser: (u: any) => void, onLogout: () => void }) {
   const { id } = useParams();
@@ -48,7 +50,7 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
       setNewForumDesc('');
       loadOffice();
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -61,49 +63,52 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
       });
       setInviteEmail('');
       loadOffice();
-      alert('User invited successfully');
+      toast.success('User invited successfully');
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
-  const handlePromote = async (userId: string) => {
-    if (!confirm('Are you sure you want to promote this user to admin?')) return;
-    try {
-      await fetchApi(`/api/offices/${id}/members/${userId}/admin`, {
-        method: 'POST',
-      });
-      loadOffice();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const handleDemote = async (userId: string) => {
-    if (!confirm('Are you sure you want to demote this user to a regular member?')) return;
-    try {
-      await fetchApi(`/api/offices/${id}/members/${userId}/demote`, {
-        method: 'POST',
-      });
-      loadOffice();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const handleKick = async (userId: string) => {
-    if (!confirm('Are you sure you want to kick this user?')) return;
-    try {
-      const res = await fetchApi(`/api/offices/${id}/members/${userId}/kick`, {
-        method: 'POST',
-      });
-      if (res.requested) {
-        alert('A kick request has been sent to the admin.');
+  const handlePromote = (userId: string) => {
+    confirmAction('Are you sure you want to promote this user to admin?', async () => {
+      try {
+        await fetchApi(`/api/offices/${id}/members/${userId}/admin`, {
+          method: 'POST',
+        });
+        loadOffice();
+      } catch (err: any) {
+        toast.error(err.message);
       }
-      loadOffice();
-    } catch (err: any) {
-      alert(err.message);
-    }
+    });
+  };
+
+  const handleDemote = (userId: string) => {
+    confirmAction('Are you sure you want to demote this user to a regular member?', async () => {
+      try {
+        await fetchApi(`/api/offices/${id}/members/${userId}/demote`, {
+          method: 'POST',
+        });
+        loadOffice();
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+    });
+  };
+
+  const handleKick = (userId: string) => {
+    confirmAction('Are you sure you want to kick this user?', async () => {
+      try {
+        const res = await fetchApi(`/api/offices/${id}/members/${userId}/kick`, {
+          method: 'POST',
+        });
+        if (res.requested) {
+          toast.success('A kick request has been sent to the admin.');
+        }
+        loadOffice();
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+    });
   };
 
   const handleKickResponse = async (action: 'resign' | 'reject') => {
@@ -119,20 +124,21 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
         loadOffice();
       }
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
-  const handleResign = async () => {
-    if (!confirm('Are you sure you want to resign from this office? You will lose access.')) return;
-    try {
-      await fetchApi(`/api/offices/${id}/resign`, {
-        method: 'POST',
-      });
-      navigate('/');
-    } catch (err: any) {
-      alert(err.message);
-    }
+  const handleResign = () => {
+    confirmAction('Are you sure you want to resign from this office? You will lose access.', async () => {
+      try {
+        await fetchApi(`/api/offices/${id}/resign`, {
+          method: 'POST',
+        });
+        navigate('/');
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+    });
   };
 
   const loadDeletionStatus = async () => {
@@ -155,13 +161,13 @@ export function Office({ user, onUpdateUser, onLogout }: { user: any, onUpdateUs
         method: 'POST',
       });
       if (res.archived) {
-        alert('Office has been archived/deleted.');
+        toast.success('Office has been archived/deleted.');
         navigate('/');
       } else {
         loadDeletionStatus();
       }
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
