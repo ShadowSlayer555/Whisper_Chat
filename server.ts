@@ -1,5 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import cookieParser from 'cookie-parser';
 import { db, initDb } from './src/db.ts';
 import bcrypt from 'bcryptjs';
@@ -25,7 +27,26 @@ function getAi() {
 async function startServer() {
   await initDb();
   const app = express();
+  const server = createServer(app);
+  const io = new Server(server, { cors: { origin: '*' } });
   const PORT = 3000;
+
+  // WebRTC Signaling
+  io.on('connection', (socket) => {
+    socket.on('join-call', ({ forumId, userId, userDetails, type }) => {
+      const room = `call-${forumId}`;
+      socket.join(room);
+      socket.to(room).emit('user-joined', { userId, socketId: socket.id, userDetails, type });
+
+      socket.on('signal', ({ to, signal }) => {
+        io.to(to).emit('signal', { from: socket.id, signal, userId, userDetails });
+      });
+
+      socket.on('disconnect', () => {
+        socket.to(room).emit('user-left', { userId, socketId: socket.id });
+      });
+    });
+  });
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -992,6 +1013,21 @@ Return ONLY the warning text, or nothing if it's fine.`;
     res.json({ success: true });
   });
 
+  // Forums: Start/End Call
+  app.post('/api/forums/:id/call', authenticate, async (req: any, res) => {
+    const forumId = req.params.id;
+    const { type } = req.body; // 'video', 'voice', or null to end
+
+    const access = await checkForumAccess(forumId, req.user.id);
+    if (!access.hasAccess) return res.status(403).json({ error: 'Access denied' });
+
+    await db.execute({
+      sql: 'UPDATE forums SET active_call_type = ? WHERE id = ?',
+      args: [type, forumId]
+    });
+    res.json({ success: true, type });
+  });
+
   // Users: Search
   app.get('/api/users/search', authenticate, async (req: any, res) => {
     const q = req.query.q;
@@ -1042,7 +1078,7 @@ Return ONLY the warning text, or nothing if it's fine.`;
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
