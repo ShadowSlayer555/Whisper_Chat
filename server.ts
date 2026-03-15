@@ -123,7 +123,13 @@ async function startServer() {
           await emailjs.send(
             process.env.EMAILJS_SERVICE_ID,
             process.env.EMAILJS_TEMPLATE_ID,
-            { to_email: email, code: code },
+            { 
+              to_email: email, 
+              code: code,
+              name: 'Whisper Chat',
+              app: 'Whisper Chat',
+              email: 'noreply@whisperchat.app'
+            },
             { publicKey: process.env.EMAILJS_PUBLIC_KEY, privateKey: process.env.EMAILJS_PRIVATE_KEY }
           );
         } else {
@@ -174,7 +180,13 @@ async function startServer() {
           await emailjs.send(
             process.env.EMAILJS_SERVICE_ID,
             process.env.EMAILJS_TEMPLATE_ID,
-            { to_email: email, code: code },
+            { 
+              to_email: email, 
+              code: code,
+              name: 'Whisper Chat',
+              app: 'Whisper Chat',
+              email: 'noreply@whisperchat.app'
+            },
             { publicKey: process.env.EMAILJS_PUBLIC_KEY, privateKey: process.env.EMAILJS_PRIVATE_KEY }
           );
         } else {
