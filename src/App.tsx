@@ -5,6 +5,8 @@ import { Auth } from './components/Auth';
 import { OfficeList } from './components/OfficeList';
 import { Office } from './components/Office';
 import { Forum } from './components/Forum';
+import { CallListener } from './components/CallListener';
+import { NotificationPrompt } from './components/NotificationPrompt';
 import { fetchApi } from './lib/api';
 
 function LandingPage({ onSignInClick }: { onSignInClick: () => void }) {
@@ -75,6 +77,8 @@ export default function App() {
     <>
       <Toaster position="top-center" />
       <HashRouter>
+        {user && <CallListener user={user} />}
+        {user && <NotificationPrompt user={user} onUpdateUser={setUser} />}
         <Routes>
           <Route 
             path="/" 

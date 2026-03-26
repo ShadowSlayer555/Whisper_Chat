@@ -34,6 +34,10 @@ async function startServer() {
 
   // WebRTC Signaling
   io.on('connection', (socket) => {
+    socket.on('authenticate', (userId) => {
+      socket.join(`user-${userId}`);
+    });
+
     socket.on('join-call', ({ forumId, userId, userDetails, type }) => {
       const room = `call-${forumId}`;
       socket.join(room);
@@ -261,10 +265,19 @@ async function startServer() {
 
   app.get('/api/auth/me', authenticate, async (req: any, res) => {
     const userResult = await db.execute({
-      sql: 'SELECT id, email, username, profile_picture FROM users WHERE id = ?',
+      sql: 'SELECT id, email, username, profile_picture, notifications_enabled, ringtone_enabled FROM users WHERE id = ?',
       args: [req.user.id]
     });
     res.json(userResult.rows[0]);
+  });
+
+  app.put('/api/auth/settings', authenticate, async (req: any, res) => {
+    const { notifications_enabled, ringtone_enabled } = req.body;
+    await db.execute({
+      sql: 'UPDATE users SET notifications_enabled = ?, ringtone_enabled = ? WHERE id = ?',
+      args: [notifications_enabled ? 1 : 0, ringtone_enabled ? 1 : 0, req.user.id]
+    });
+    res.json({ success: true });
   });
 
   async function checkForumAccess(forumId: string | number, userId: string | number) {
@@ -297,7 +310,9 @@ async function startServer() {
         return { 
           hasAccess: true, 
           role: role, 
-          kicked_at: accessResult.rows[0].kicked_at 
+          kicked_at: accessResult.rows[0].kicked_at,
+          officeId: forum.office_id,
+          creatorId: forum.creator_id
         };
       }
       return { hasAccess: false };
@@ -306,7 +321,11 @@ async function startServer() {
         sql: 'SELECT 1 FROM forums f LEFT JOIN forum_invites fi ON f.id = fi.forum_id WHERE f.id = ? AND (f.creator_id = ? OR fi.user_id = ?)',
         args: [forumId, userId, userId]
       });
-      return { hasAccess: accessResult.rows.length > 0 };
+      return { 
+        hasAccess: accessResult.rows.length > 0,
+        officeId: null,
+        creatorId: forum.creator_id
+      };
     }
   }
 
@@ -1084,6 +1103,51 @@ Return ONLY the warning text, or nothing if it's fine.`;
       sql: 'UPDATE forums SET active_call_type = ? WHERE id = ?',
       args: [type, forumId]
     });
+
+    if (type) {
+      // Notify all users in the forum
+      let userIds = [];
+      if (access.officeId) {
+        const members = await db.execute({
+          sql: "SELECT user_id FROM office_members WHERE office_id = ? AND role != 'kicked'",
+          args: [access.officeId]
+        });
+        userIds = members.rows.map(r => r.user_id);
+      } else {
+        const members = await db.execute({
+          sql: 'SELECT user_id FROM forum_invites WHERE forum_id = ?',
+          args: [forumId]
+        });
+        userIds = members.rows.map(r => r.user_id);
+        userIds.push(access.creatorId);
+      }
+
+      const forumDetails = await db.execute({
+        sql: 'SELECT title FROM forums WHERE id = ?',
+        args: [forumId]
+      });
+
+      const callerDetails = await db.execute({
+        sql: 'SELECT username, profile_picture FROM users WHERE id = ?',
+        args: [req.user.id]
+      });
+
+      for (const uid of userIds) {
+        if (uid !== req.user.id) {
+          io.to(`user-${uid}`).emit('incoming-call', {
+            forumId,
+            forumTitle: forumDetails.rows[0]?.title,
+            callerName: callerDetails.rows[0]?.username,
+            callerPic: callerDetails.rows[0]?.profile_picture,
+            type
+          });
+        }
+      }
+    } else {
+      // End call
+      io.to(`call-${forumId}`).emit('call-ended');
+    }
+
     res.json({ success: true, type });
   });
 

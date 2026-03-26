@@ -72,47 +72,50 @@ export function OfficeList({ user, onUpdateUser, onLogout }: { user: any, onUpda
   const hasArchived = offices.some(o => o.status === 'archived');
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="flex justify-between items-center mb-8">
+    <div className="max-w-4xl mx-auto p-4 sm:p-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Your Offices</h1>
-          <p className="text-slate-500 mt-1">Welcome back, {user.username}</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Your Offices</h1>
+          <p className="text-sm sm:text-base text-slate-500 mt-1">Welcome back, {user.username}</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto">
           {hasArchived && (
-            <div className="flex bg-slate-100 p-1 rounded-xl">
+            <div className="flex bg-slate-100 p-1 rounded-xl shrink-0">
               <button
                 onClick={() => setActiveTab('active')}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'active' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'active' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 Active
               </button>
               <button
                 onClick={() => setActiveTab('archived')}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'archived' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'archived' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 Archives
               </button>
             </div>
           )}
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="text"
               placeholder="Search offices..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none w-64"
+              className="w-full sm:w-64 pl-10 pr-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
-          <button
-            onClick={() => setIsCreating(true)}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors"
-          >
-            <Plus size={20} />
-            New Office
-          </button>
-          <UserMenu user={user} onUpdate={onUpdateUser} onLogout={onLogout} />
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setIsCreating(true)}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors"
+            >
+              <Plus size={20} />
+              <span className="hidden sm:inline">New Office</span>
+              <span className="sm:hidden">New</span>
+            </button>
+            <UserMenu user={user} onUpdate={onUpdateUser} onLogout={onLogout} />
+          </div>
         </div>
       </div>
 

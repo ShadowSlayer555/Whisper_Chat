@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { fetchApi } from '../lib/api';
-import { LogOut, X, Upload } from 'lucide-react';
+import { LogOut, X, Upload, Bell, Volume2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u: any) => void, onLogout: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
   const [username, setUsername] = useState(user.username);
   const [profilePic, setProfilePic] = useState(user.profile_picture);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(!!user.notifications_enabled);
+  const [ringtoneEnabled, setRingtoneEnabled] = useState(!!user.ringtone_enabled);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -27,12 +30,38 @@ export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u
         method: 'PUT',
         body: JSON.stringify({ username, profile_picture: profilePic })
       });
-      onUpdate(updatedUser);
+      
+      await fetchApi('/api/auth/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ notifications_enabled: notificationsEnabled, ringtone_enabled: ringtoneEnabled })
+      });
+      
+      onUpdate({ ...updatedUser, notifications_enabled: notificationsEnabled, ringtone_enabled: ringtoneEnabled });
       setIsOpen(false);
+      toast.success('Profile updated');
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      toast.error('This browser does not support desktop notification');
+      return;
+    }
+    if (Notification.permission === 'granted') {
+      setNotificationsEnabled(true);
+    } else if (Notification.permission !== 'denied') {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        setNotificationsEnabled(true);
+      } else {
+        toast.error('Notification permission denied');
+      }
+    } else {
+      toast.error('Please enable notifications in your browser settings');
     }
   };
 
@@ -46,7 +75,7 @@ export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u
 
       {isOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 relative">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setIsOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
               <X size={20} />
             </button>
@@ -75,6 +104,54 @@ export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
                 <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" />
+              </div>
+
+              <div className="border-t border-slate-200 pt-4 mt-4 space-y-4">
+                <h3 className="text-sm font-semibold text-slate-900">Preferences</h3>
+                
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Bell size={18} className="text-slate-500" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">Push Notifications</p>
+                      <p className="text-xs text-slate-500">Get notified of calls and mentions</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={notificationsEnabled}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          requestNotificationPermission();
+                        } else {
+                          setNotificationsEnabled(false);
+                        }
+                      }}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Volume2 size={18} className="text-slate-500" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">Call Ringtone</p>
+                      <p className="text-xs text-slate-500">Play sound for incoming calls</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={ringtoneEnabled}
+                      onChange={(e) => setRingtoneEnabled(e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
               </div>
 
               <div className="pt-4 flex items-center justify-between">

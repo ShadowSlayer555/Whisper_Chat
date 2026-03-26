@@ -20,6 +20,8 @@ export const initDb = async () => {
       two_factor_secret TEXT,
       is_verified BOOLEAN DEFAULT 0,
       last_email_sent_at DATETIME,
+      notifications_enabled BOOLEAN DEFAULT 0,
+      ringtone_enabled BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -104,6 +106,8 @@ export const initDb = async () => {
   try { await db.execute("ALTER TABLE office_members ADD COLUMN kick_requested_by INTEGER REFERENCES users(id)"); } catch (e) {}
   try { await db.execute("ALTER TABLE forums ADD COLUMN solution_message_id INTEGER REFERENCES messages(id)"); } catch (e) {}
   try { await db.execute("ALTER TABLE forums ADD COLUMN active_call_type TEXT"); } catch (e) {}
+  try { await db.execute("ALTER TABLE users ADD COLUMN notifications_enabled BOOLEAN DEFAULT 0"); } catch (e) {}
+  try { await db.execute("ALTER TABLE users ADD COLUMN ringtone_enabled BOOLEAN DEFAULT 0"); } catch (e) {}
   try { 
     await db.execute(`
       CREATE TABLE IF NOT EXISTS office_deletion_approvals (

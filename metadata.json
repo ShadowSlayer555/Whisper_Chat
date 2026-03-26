@@ -1,5 +1,5 @@
 {
-  "name": "Secure Issue Forums",
+  "name": "Whisper Chat",
   "description": "A secure, invite-only issue forum with immutable messages, 2FA, and mentions.",
   "requestFramePermissions": []
 }

@@ -121,14 +121,14 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     }
   };
 
-  const startLocalStream = async (audioId?: string, videoId?: string) => {
+  const startLocalStream = async (audioId?: string, videoId?: string, requestVideo: boolean = !isVideoOff) => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: audioId ? { deviceId: { exact: audioId } } : true,
-        video: callType === 'video' ? (videoId ? { deviceId: { exact: videoId } } : true) : false
+        video: requestVideo ? (videoId ? { deviceId: { exact: videoId } } : true) : false
       });
       setLocalStream(stream);
       localStreamRef.current = stream;
@@ -138,7 +138,11 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         const senders = peer.getSenders();
         stream.getTracks().forEach(track => {
           const sender = senders.find(s => s.track?.kind === track.kind);
-          if (sender) sender.replaceTrack(track);
+          if (sender) {
+            sender.replaceTrack(track);
+          } else {
+            peer.addTrack(track, stream);
+          }
         });
       });
     } catch (err) {
@@ -239,13 +243,10 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     }
   };
 
-  const toggleVideo = () => {
-    if (localStreamRef.current && callType === 'video') {
-      localStreamRef.current.getVideoTracks().forEach(track => {
-        track.enabled = !track.enabled;
-      });
-      setIsVideoOff(!localStreamRef.current.getVideoTracks()[0].enabled);
-    }
+  const toggleVideo = async () => {
+    const newVideoState = !isVideoOff;
+    setIsVideoOff(newVideoState);
+    await startLocalStream(selectedAudio, selectedVideo, !newVideoState);
   };
 
   const handleDeviceChange = (kind: 'audio' | 'video', deviceId: string) => {
@@ -329,7 +330,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         </div>
       )}
 
-      <div className={`w-80 bg-slate-900 text-white flex flex-col h-full border-l border-slate-800 animate-in slide-in-from-right duration-300 shadow-2xl z-50 ${isFullscreen ? 'hidden' : ''}`}>
+      <div className={`absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 bg-slate-900 text-white flex flex-col h-full border-l border-slate-800 animate-in slide-in-from-right duration-300 shadow-2xl z-50 ${isFullscreen ? 'hidden' : ''}`}>
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
           <div>
             <h3 className="font-bold text-sm flex items-center gap-2">
@@ -402,14 +403,12 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             >
               {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
-            {callType === 'video' && (
-              <button
-                onClick={toggleVideo}
-                className={`p-3 rounded-full transition-colors ${isVideoOff ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
-              >
-                {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
-              </button>
-            )}
+            <button
+              onClick={toggleVideo}
+              className={`p-3 rounded-full transition-colors ${isVideoOff ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+            >
+              {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
+            </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
               className={`p-3 rounded-full transition-colors ${showSettings ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
@@ -432,20 +431,18 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
                   ))}
                 </select>
               </div>
-              {callType === 'video' && (
-                <div>
-                  <label className="block text-slate-400 text-xs mb-1">Camera</label>
-                  <select
-                    value={selectedVideo}
-                    onChange={(e) => handleDeviceChange('video', e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white outline-none focus:border-indigo-500"
-                  >
-                    {videoDevices.map(d => (
-                      <option key={d.deviceId} value={d.deviceId}>{d.label || 'Camera'}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="block text-slate-400 text-xs mb-1">Camera</label>
+                <select
+                  value={selectedVideo}
+                  onChange={(e) => handleDeviceChange('video', e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white outline-none focus:border-indigo-500"
+                >
+                  {videoDevices.map(d => (
+                    <option key={d.deviceId} value={d.deviceId}>{d.label || 'Camera'}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
         </div>

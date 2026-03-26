@@ -122,6 +122,14 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
     loadMessages();
     markMentionsRead();
     markForumRead();
+    
+    const params = new URLSearchParams(window.location.search);
+    const joinCall = params.get('joinCall');
+    if (joinCall === 'video' || joinCall === 'voice') {
+      setActiveCall(joinCall);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     const interval = setInterval(() => {
       loadMessages();
       markForumRead();
@@ -342,67 +350,79 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
   return (
     <div className="max-w-5xl mx-auto h-screen flex flex-col bg-slate-50 relative">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate(forum.office_id ? `/office/${forum.office_id}` : '/')} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+      <header className="bg-white border-b border-slate-200 p-2 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shrink-0 gap-2 sm:gap-0">
+        <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto">
+          <button onClick={() => navigate(forum.office_id ? `/office/${forum.office_id}` : '/')} className="p-2 hover:bg-slate-100 rounded-full transition-colors shrink-0">
             <ArrowLeft size={20} className="text-slate-600" />
           </button>
-          <div className="flex items-center gap-3">
-            <div>
-              <h1 className="text-xl font-bold text-slate-900">{forum.title}</h1>
-              <p className="text-sm text-slate-500">{forum.description}</p>
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-xl font-bold text-slate-900 truncate">{forum.title}</h1>
+              <p className="text-xs sm:text-sm text-slate-500 truncate">{forum.description}</p>
             </div>
             {forum?.solution_message_id && (
-              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-600" title="This forum has a solution">
-                <CheckCircle2 size={20} />
+              <div className="flex items-center justify-center w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-emerald-100 text-emerald-600 shrink-0" title="This forum has a solution">
+                <CheckCircle2 size={16} className="sm:w-5 sm:h-5" />
               </div>
             )}
             {forum?.active_call_type && !activeCall && (
-              <button onClick={() => setActiveCall(forum.active_call_type)} className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold px-3 py-1.5 rounded-full border border-red-100 transition-colors">
+              <button onClick={() => setActiveCall(forum.active_call_type)} className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border border-red-100 transition-colors shrink-0">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
                 </span>
-                {forum.active_call_type === 'video' ? <Video size={14} /> : <Mic size={14} />}
-                Join Live Call
+                {forum.active_call_type === 'video' ? <Video size={12} className="sm:w-3.5 sm:h-3.5" /> : <Mic size={12} className="sm:w-3.5 sm:h-3.5" />}
+                <span className="hidden sm:inline">Join Live Call</span>
+                <span className="sm:hidden">Join</span>
               </button>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 mr-2 border-r border-slate-200 pr-4">
+        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-1 sm:gap-2 sm:mr-2 sm:border-r sm:border-slate-200 sm:pr-4">
             <button
               onClick={() => toggleCall('voice')}
-              className={`p-2 rounded-lg transition-colors ${activeCall === 'voice' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-100'}`}
+              className={`p-1.5 sm:p-2 rounded-lg transition-colors ${activeCall === 'voice' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-100'}`}
               title="Start Voice Call"
             >
-              <Mic size={20} />
+              <Mic size={18} className="sm:w-5 sm:h-5" />
             </button>
             <button
               onClick={() => toggleCall('video')}
-              className={`p-2 rounded-lg transition-colors ${activeCall === 'video' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-100'}`}
+              className={`p-1.5 sm:p-2 rounded-lg transition-colors ${activeCall === 'video' ? 'bg-indigo-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-100'}`}
               title="Start Video Call"
             >
-              <Video size={20} />
+              <Video size={18} className="sm:w-5 sm:h-5" />
             </button>
           </div>
-          <div className="relative mr-2">
+          <div className="relative hidden sm:block sm:mr-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input
               type="text"
               placeholder="Search messages or users..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none w-56"
+              className="pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none w-40 md:w-56"
             />
           </div>
-          <button onClick={handleCopyChat} className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors">
-            <Download size={16} />
-            Export
+          <button onClick={handleCopyChat} className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 bg-slate-900 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors shrink-0">
+            <Download size={14} className="sm:w-4 sm:h-4" />
+            <span className="hidden sm:inline">Export</span>
           </button>
-          <div className="ml-2">
+          <div className="ml-1 sm:ml-2 shrink-0">
             <UserMenu user={user} onUpdate={onUpdateUser} onLogout={onLogout} />
           </div>
+        </div>
+        {/* Mobile search bar */}
+        <div className="relative w-full sm:hidden mt-2">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+          <input 
+            type="text" 
+            placeholder="Search messages or users..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+          />
         </div>
       </header>
 
