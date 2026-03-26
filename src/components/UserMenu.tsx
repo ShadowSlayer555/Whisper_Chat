@@ -53,10 +53,12 @@ export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u
     }
     if (Notification.permission === 'granted') {
       setNotificationsEnabled(true);
+      setRingtoneEnabled(true);
     } else if (Notification.permission !== 'denied') {
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
         setNotificationsEnabled(true);
+        setRingtoneEnabled(true);
       } else {
         toast.error('Notification permission denied');
       }
