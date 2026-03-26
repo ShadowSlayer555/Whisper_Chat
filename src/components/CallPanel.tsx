@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Mic, MicOff, Video, VideoOff, X, Settings, Maximize2, MonitorUp, Pin, Shield } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface CallPanelProps {
   forumId: string;
@@ -136,6 +137,12 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         audio: audioId ? { deviceId: { exact: audioId } } : true,
         video: requestVideo ? (videoId ? { deviceId: { exact: videoId } } : true) : false
       });
+      
+      // Apply current mute state to new audio tracks
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = !isMuted;
+      });
+      
       setLocalStream(stream);
       localStreamRef.current = stream;
       
@@ -308,6 +315,10 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       stopScreenShare();
     } else {
       try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          toast.error('Screen sharing is not supported on this device or browser.');
+          return;
+        }
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         const screenTrack = screenStream.getVideoTracks()[0];
         
@@ -338,8 +349,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             socketRef.current.emit('call-state-change', { forumId, isMuted, isVideoOff: false });
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error sharing screen", err);
+        toast.error(err.name === 'NotAllowedError' ? 'Screen sharing permission denied.' : 'Screen sharing is not supported on this device or browser.');
       }
     }
   };

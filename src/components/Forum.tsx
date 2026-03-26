@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
 import { ArrowLeft, Download, Send, UserPlus, Reply, ChevronDown, ChevronRight, Search, Info, X, AlertTriangle, CheckCircle2, ArrowDown, Video, Mic } from 'lucide-react';
 import { format } from 'date-fns';
@@ -107,6 +107,7 @@ const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, 
 export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUser: (u: any) => void, onLogout: () => void }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [forum, setForum] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -131,19 +132,21 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
     markMentionsRead();
     markForumRead();
     
-    const params = new URLSearchParams(window.location.search);
-    const joinCall = params.get('joinCall');
-    if (joinCall === 'video' || joinCall === 'voice') {
-      setActiveCall(joinCall);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-
     const interval = setInterval(() => {
       loadMessages();
       markForumRead();
     }, 5000); // Poll for new messages
     return () => clearInterval(interval);
   }, [id]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const joinCall = params.get('joinCall');
+    if (joinCall === 'video' || joinCall === 'voice') {
+      setActiveCall(joinCall);
+      navigate(location.pathname, { replace: true });
+    }
+  }, [location.search, location.pathname, navigate]);
 
   useEffect(() => {
     const timer = setTimeout(() => {

@@ -9,18 +9,28 @@ export function CallListener({ user }: { user: any }) {
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio('/universfield-ringtone.mp3');
+      audioRef.current.loop = true;
+    }
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
 
     const socket = io();
     socket.emit('authenticate', user.id);
 
     socket.on('incoming-call', (data) => {
-      if (user.ringtone_enabled) {
-        if (!audioRef.current) {
-          audioRef.current = new Audio('/universfield-ringtone.mp3');
-          audioRef.current.loop = true;
+      if (user.ringtone_enabled && audioRef.current) {
+        audioRef.current.currentTime = 0;
+        const playPromise = audioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(e => {
+            console.error("Audio play failed, likely due to autoplay policy:", e);
+            // We can't force play without user interaction
+          });
         }
-        audioRef.current.play().catch(e => console.error("Audio play failed", e));
       }
       setIncomingCall(data);
       
@@ -78,8 +88,7 @@ export function CallListener({ user }: { user: any }) {
     }
     const forumId = incomingCall.forumId;
     setIncomingCall(null);
-    // Force a full navigation to ensure the component remounts and reads the query param
-    window.location.href = `/forum/${forumId}?joinCall=${type}`;
+    navigate(`/forum/${forumId}?joinCall=${type}`);
   };
 
   const handleDecline = () => {
