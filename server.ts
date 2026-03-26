@@ -1131,6 +1131,15 @@ Return ONLY the warning text, or nothing if it's fine.`;
         sql: 'SELECT username, profile_picture FROM users WHERE id = ?',
         args: [req.user.id]
       });
+      
+      const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const callTypeStr = type === 'video' ? 'Video' : 'Voice';
+      const messageContent = `${callTypeStr} Call started at ${timeString} by ${callerDetails.rows[0]?.username}`;
+      
+      await db.execute({
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_start')",
+        args: [forumId, req.user.id, messageContent]
+      });
 
       for (const uid of userIds) {
         if (uid !== req.user.id) {
@@ -1139,12 +1148,25 @@ Return ONLY the warning text, or nothing if it's fine.`;
             forumTitle: forumDetails.rows[0]?.title,
             callerName: callerDetails.rows[0]?.username,
             callerPic: callerDetails.rows[0]?.profile_picture,
-            type
+            callType: type
           });
         }
       }
     } else {
       // End call
+      const callerDetails = await db.execute({
+        sql: 'SELECT username FROM users WHERE id = ?',
+        args: [req.user.id]
+      });
+      
+      const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const messageContent = `Call ended at ${timeString} by ${callerDetails.rows[0]?.username}`;
+      
+      await db.execute({
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_end')",
+        args: [forumId, req.user.id, messageContent]
+      });
+      
       io.to(`call-${forumId}`).emit('call-ended');
     }
 

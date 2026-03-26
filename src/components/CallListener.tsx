@@ -76,8 +76,10 @@ export function CallListener({ user }: { user: any }) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
+    const forumId = incomingCall.forumId;
     setIncomingCall(null);
-    navigate(`/forum/${incomingCall.forumId}?joinCall=${type}`);
+    // Force a full navigation to ensure the component remounts and reads the query param
+    window.location.href = `/forum/${forumId}?joinCall=${type}`;
   };
 
   const handleDecline = () => {
@@ -85,8 +87,9 @@ export function CallListener({ user }: { user: any }) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
+    const forumId = incomingCall.forumId;
     setIncomingCall(null);
-    navigate(`/forum/${incomingCall.forumId}`);
+    navigate(`/forum/${forumId}`);
   };
 
   return (

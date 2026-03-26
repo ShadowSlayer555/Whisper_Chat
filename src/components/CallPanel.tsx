@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Mic, MicOff, Video, VideoOff, X, Settings, Maximize2 } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, X, Settings, Maximize2, MonitorUp, Pin, Shield } from 'lucide-react';
 
 interface CallPanelProps {
   forumId: string;
@@ -8,6 +8,7 @@ interface CallPanelProps {
   user: any;
   callType: 'video' | 'voice';
   onClose: () => void;
+  canManage: boolean;
 }
 
 interface Participant {
@@ -15,13 +16,16 @@ interface Participant {
   socketId: string;
   userDetails: any;
   stream?: MediaStream;
+  isMuted?: boolean;
+  isVideoOff?: boolean;
 }
 
-export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user, callType, onClose }) => {
+export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user, callType, onClose, canManage }) => {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(callType === 'voice');
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -31,10 +35,12 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
+  const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
   const localStreamRef = useRef<MediaStream | null>(null);
+  const originalVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyzersRef = useRef<{ [id: string]: AnalyserNode }>({});
@@ -159,7 +165,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     socket.on('user-joined', async ({ userId, socketId, userDetails }) => {
       const peer = createPeer(socketId, true);
       peersRef.current[socketId] = peer;
-      setParticipants(prev => [...prev, { userId, socketId, userDetails }]);
+      setParticipants(prev => [...prev, { userId, socketId, userDetails, isMuted: false, isVideoOff: false }]);
+      // Send our current state to the new user
+      socket.emit('call-state-change', { forumId, isMuted, isVideoOff });
     });
 
     socket.on('signal', async ({ from, signal, userId, userDetails }) => {
@@ -169,7 +177,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         peersRef.current[from] = peer;
         setParticipants(prev => {
           if (!prev.find(p => p.socketId === from)) {
-            return [...prev, { userId, socketId: from, userDetails }];
+            return [...prev, { userId, socketId: from, userDetails, isMuted: false, isVideoOff: false }];
           }
           return prev;
         });
@@ -197,6 +205,42 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         delete peersRef.current[socketId];
       }
       setParticipants(prev => prev.filter(p => p.socketId !== socketId));
+      if (pinnedParticipantId === socketId) setPinnedParticipantId(null);
+    });
+
+    socket.on('call-state-change', ({ socketId, isMuted, isVideoOff }) => {
+      setParticipants(prev => prev.map(p => {
+        if (p.socketId === socketId) {
+          return { ...p, isMuted, isVideoOff };
+        }
+        return p;
+      }));
+    });
+
+    socket.on('admin-action', ({ action, targetSocketId }) => {
+      if (targetSocketId === socketRef.current?.id) {
+        if (action === 'mute') {
+          if (localStreamRef.current) {
+            localStreamRef.current.getAudioTracks().forEach(track => track.enabled = false);
+            setIsMuted(true);
+            socketRef.current?.emit('call-state-change', { forumId, isMuted: true, isVideoOff });
+          }
+        } else if (action === 'unmute') {
+          if (localStreamRef.current) {
+            localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
+            setIsMuted(false);
+            socketRef.current?.emit('call-state-change', { forumId, isMuted: false, isVideoOff });
+          }
+        } else if (action === 'video-off') {
+           setIsVideoOff(true);
+           startLocalStream(selectedAudio, selectedVideo, false);
+           socketRef.current?.emit('call-state-change', { forumId, isMuted, isVideoOff: true });
+        } else if (action === 'video-on') {
+           setIsVideoOff(false);
+           startLocalStream(selectedAudio, selectedVideo, true);
+           socketRef.current?.emit('call-state-change', { forumId, isMuted, isVideoOff: false });
+        }
+      }
     });
   };
 
@@ -236,17 +280,96 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   const toggleMute = () => {
     if (localStreamRef.current) {
+      const newMutedState = !isMuted;
       localStreamRef.current.getAudioTracks().forEach(track => {
-        track.enabled = !track.enabled;
+        track.enabled = !newMutedState;
       });
-      setIsMuted(!localStreamRef.current.getAudioTracks()[0].enabled);
+      setIsMuted(newMutedState);
+      if (socketRef.current) {
+        socketRef.current.emit('call-state-change', { forumId, isMuted: newMutedState, isVideoOff });
+      }
     }
   };
 
   const toggleVideo = async () => {
     const newVideoState = !isVideoOff;
     setIsVideoOff(newVideoState);
+    if (isScreenSharing) {
+      stopScreenShare();
+    }
     await startLocalStream(selectedAudio, selectedVideo, !newVideoState);
+    if (socketRef.current) {
+      socketRef.current.emit('call-state-change', { forumId, isMuted, isVideoOff: newVideoState });
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      stopScreenShare();
+    } else {
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = screenStream.getVideoTracks()[0];
+        
+        screenTrack.onended = () => {
+          stopScreenShare();
+        };
+
+        if (localStreamRef.current) {
+          originalVideoTrackRef.current = localStreamRef.current.getVideoTracks()[0];
+          
+          // Replace track in local stream
+          if (originalVideoTrackRef.current) {
+             localStreamRef.current.removeTrack(originalVideoTrackRef.current);
+          }
+          localStreamRef.current.addTrack(screenTrack);
+          
+          // Replace track for all peers
+          Object.values(peersRef.current).forEach(peer => {
+            const sender = peer.getSenders().find(s => s.track?.kind === 'video');
+            if (sender) {
+              sender.replaceTrack(screenTrack);
+            }
+          });
+          
+          setIsScreenSharing(true);
+          setIsVideoOff(false);
+          if (socketRef.current) {
+            socketRef.current.emit('call-state-change', { forumId, isMuted, isVideoOff: false });
+          }
+        }
+      } catch (err) {
+        console.error("Error sharing screen", err);
+      }
+    }
+  };
+
+  const stopScreenShare = async () => {
+    if (localStreamRef.current) {
+      const screenTrack = localStreamRef.current.getVideoTracks()[0];
+      if (screenTrack) screenTrack.stop();
+      
+      if (originalVideoTrackRef.current && !isVideoOff) {
+        localStreamRef.current.removeTrack(screenTrack);
+        localStreamRef.current.addTrack(originalVideoTrackRef.current);
+        
+        Object.values(peersRef.current).forEach(peer => {
+          const sender = peer.getSenders().find(s => s.track?.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(originalVideoTrackRef.current);
+          }
+        });
+      } else {
+        await startLocalStream(selectedAudio, selectedVideo, !isVideoOff);
+      }
+    }
+    setIsScreenSharing(false);
+  };
+
+  const handleAdminAction = (action: 'mute' | 'unmute' | 'video-off' | 'video-on', targetSocketId: string) => {
+    if (socketRef.current && canManage) {
+      socketRef.current.emit('admin-action', { forumId, action, targetSocketId });
+    }
   };
 
   const handleDeviceChange = (kind: 'audio' | 'video', deviceId: string) => {
@@ -259,9 +382,13 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     }
   };
 
-  const activeParticipant = activeSpeakerId === 'local' 
-    ? { socketId: 'local', userDetails: user, stream: localStreamRef.current }
-    : participants.find(p => p.socketId === activeSpeakerId) || participants[0] || { socketId: 'local', userDetails: user, stream: localStreamRef.current };
+  const activeParticipant = pinnedParticipantId === 'local'
+    ? { socketId: 'local', userDetails: user, stream: localStreamRef.current, isMuted, isVideoOff }
+    : pinnedParticipantId
+      ? participants.find(p => p.socketId === pinnedParticipantId) || participants[0]
+      : activeSpeakerId === 'local' 
+        ? { socketId: 'local', userDetails: user, stream: localStreamRef.current, isMuted, isVideoOff }
+        : participants.find(p => p.socketId === activeSpeakerId) || participants[0] || { socketId: 'local', userDetails: user, stream: localStreamRef.current, isMuted, isVideoOff };
 
   return (
     <>
@@ -272,7 +399,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           </button>
           
           <div className="flex-1 relative flex items-center justify-center p-8">
-            {activeParticipant.stream && activeParticipant.stream.getVideoTracks().length > 0 ? (
+            {activeParticipant?.stream && activeParticipant.stream.getVideoTracks().length > 0 && !activeParticipant.isVideoOff ? (
               <VideoPlayer 
                 stream={activeParticipant.stream} 
                 muted={activeParticipant.socketId === 'local'} 
@@ -280,25 +407,27 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
               />
             ) : (
               <div className="flex flex-col items-center justify-center">
-                <img src={activeParticipant.userDetails?.profile_picture} alt="" className="w-48 h-48 rounded-full border-4 border-slate-700 shadow-2xl mb-6" />
-                <h2 className="text-3xl font-bold text-white">{activeParticipant.userDetails?.username}</h2>
-                <p className="text-slate-400 mt-2">Speaking...</p>
+                <img src={activeParticipant?.userDetails?.profile_picture} alt="" className="w-48 h-48 rounded-full border-4 border-slate-700 shadow-2xl mb-6" />
+                <h2 className="text-3xl font-bold text-white">{activeParticipant?.userDetails?.username}</h2>
+                <p className="text-slate-400 mt-2">{activeParticipant?.isMuted ? 'Muted' : 'Speaking...'}</p>
               </div>
             )}
             
             <div className="absolute bottom-10 left-10 bg-black/60 px-4 py-2 rounded-lg text-white font-medium backdrop-blur-md border border-white/10 flex items-center gap-2">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-              </span>
-              {activeParticipant.socketId === 'local' ? 'You' : activeParticipant.userDetails?.username}
+              {!activeParticipant?.isMuted && (
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+              )}
+              {activeParticipant?.isMuted && <MicOff size={14} className="text-red-400" />}
+              {activeParticipant?.socketId === 'local' ? 'You' : activeParticipant?.userDetails?.username}
             </div>
           </div>
           
           <div className="h-32 bg-slate-900/90 border-t border-white/10 p-4 flex gap-4 overflow-x-auto items-center justify-center">
              <div 
-               onClick={() => setActiveSpeakerId('local')}
-               className={`relative h-full aspect-video bg-slate-800 rounded-lg overflow-hidden cursor-pointer border-2 transition-colors ${activeSpeakerId === 'local' ? 'border-indigo-500' : 'border-transparent hover:border-slate-600'}`}
+               className={`relative h-full aspect-video bg-slate-800 rounded-lg overflow-hidden border-2 transition-colors ${activeSpeakerId === 'local' ? 'border-indigo-500' : 'border-transparent hover:border-slate-600'}`}
              >
                {localStreamRef.current && !isVideoOff ? (
                  <VideoPlayer stream={localStreamRef.current} muted className="w-full h-full object-cover" />
@@ -307,23 +436,38 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
                    <img src={user.profile_picture} alt="" className="w-10 h-10 rounded-full" />
                  </div>
                )}
-               <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[10px] text-white">You</div>
+               <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[10px] text-white flex items-center gap-1">
+                 You {isMuted && <MicOff size={10} className="text-red-400" />}
+               </div>
+               <button 
+                 onClick={(e) => { e.stopPropagation(); setPinnedParticipantId(pinnedParticipantId === 'local' ? null : 'local'); }}
+                 className={`absolute top-1 right-1 p-1 rounded bg-black/60 text-white hover:bg-black/80 ${pinnedParticipantId === 'local' ? 'text-indigo-400' : ''}`}
+               >
+                 <Pin size={12} />
+               </button>
              </div>
              
              {participants.map(p => (
                <div 
                  key={p.socketId}
-                 onClick={() => setActiveSpeakerId(p.socketId)}
-                 className={`relative h-full aspect-video bg-slate-800 rounded-lg overflow-hidden cursor-pointer border-2 transition-colors ${activeSpeakerId === p.socketId ? 'border-indigo-500' : 'border-transparent hover:border-slate-600'}`}
+                 className={`relative h-full aspect-video bg-slate-800 rounded-lg overflow-hidden border-2 transition-colors ${activeSpeakerId === p.socketId ? 'border-indigo-500' : 'border-transparent hover:border-slate-600'}`}
                >
-                 {p.stream && p.stream.getVideoTracks().length > 0 ? (
+                 {p.stream && p.stream.getVideoTracks().length > 0 && !p.isVideoOff ? (
                    <VideoPlayer stream={p.stream} className="w-full h-full object-cover" />
                  ) : (
                    <div className="w-full h-full flex items-center justify-center">
                      <img src={p.userDetails.profile_picture} alt="" className="w-10 h-10 rounded-full" />
                    </div>
                  )}
-                 <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[10px] text-white">{p.userDetails.username}</div>
+                 <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[10px] text-white flex items-center gap-1">
+                   {p.userDetails.username} {p.isMuted && <MicOff size={10} className="text-red-400" />}
+                 </div>
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); setPinnedParticipantId(pinnedParticipantId === p.socketId ? null : p.socketId); }}
+                   className={`absolute top-1 right-1 p-1 rounded bg-black/60 text-white hover:bg-black/80 ${pinnedParticipantId === p.socketId ? 'text-indigo-400' : ''}`}
+                 >
+                   <Pin size={12} />
+                 </button>
                </div>
              ))}
           </div>
@@ -355,42 +499,77 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Local User */}
           <div 
-            className={`relative bg-slate-800 rounded-xl overflow-hidden aspect-video border-2 cursor-pointer transition-colors ${activeSpeakerId === 'local' ? 'border-indigo-500' : 'border-slate-700 hover:border-slate-600'}`}
-            onClick={() => setIsFullscreen(true)}
+            className={`relative bg-slate-800 rounded-xl overflow-hidden aspect-video border-2 transition-colors ${activeSpeakerId === 'local' ? 'border-indigo-500' : 'border-slate-700 hover:border-slate-600'}`}
           >
-            {callType === 'video' && !isVideoOff && localStreamRef.current ? (
-              <VideoPlayer stream={localStreamRef.current} muted className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-slate-800">
-                <img src={user.profile_picture} alt="" className="w-16 h-16 rounded-full border-2 border-slate-600" />
-              </div>
-            )}
-            <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs font-medium flex items-center gap-1 backdrop-blur-sm">
+            <div className="absolute inset-0 cursor-pointer" onClick={() => setIsFullscreen(true)}>
+              {callType === 'video' && !isVideoOff && localStreamRef.current ? (
+                <VideoPlayer stream={localStreamRef.current} muted className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-slate-800">
+                  <img src={user.profile_picture} alt="" className="w-16 h-16 rounded-full border-2 border-slate-600" />
+                </div>
+              )}
+            </div>
+            <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs font-medium flex items-center gap-1 backdrop-blur-sm pointer-events-none">
               You {isMuted && <MicOff size={12} className="text-red-400" />}
             </div>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setPinnedParticipantId(pinnedParticipantId === 'local' ? null : 'local'); }}
+              className={`absolute top-2 right-2 p-1.5 rounded bg-black/60 text-white hover:bg-black/80 z-10 ${pinnedParticipantId === 'local' ? 'text-indigo-400' : ''}`}
+              title="Pin video"
+            >
+              <Pin size={14} />
+            </button>
           </div>
 
           {/* Remote Users */}
           {participants.map(p => (
             <div 
               key={p.socketId} 
-              className={`relative bg-slate-800 rounded-xl overflow-hidden aspect-video border-2 cursor-pointer transition-colors ${activeSpeakerId === p.socketId ? 'border-indigo-500' : 'border-slate-700 hover:border-slate-600'}`}
-              onClick={() => setIsFullscreen(true)}
+              className={`relative bg-slate-800 rounded-xl overflow-hidden aspect-video border-2 transition-colors ${activeSpeakerId === p.socketId ? 'border-indigo-500' : 'border-slate-700 hover:border-slate-600'}`}
             >
-              {p.stream && p.stream.getVideoTracks().length > 0 ? (
-                <VideoPlayer stream={p.stream} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-slate-800">
-                  <img src={p.userDetails.profile_picture} alt="" className="w-16 h-16 rounded-full border-2 border-slate-600" />
+              <div className="absolute inset-0 cursor-pointer" onClick={() => setIsFullscreen(true)}>
+                {p.stream && p.stream.getVideoTracks().length > 0 && !p.isVideoOff ? (
+                  <VideoPlayer stream={p.stream} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-slate-800">
+                    <img src={p.userDetails.profile_picture} alt="" className="w-16 h-16 rounded-full border-2 border-slate-600" />
+                  </div>
+                )}
+                {/* Hidden audio player for remote users without video */}
+                {p.stream && (p.stream.getVideoTracks().length === 0 || p.isVideoOff) && (
+                  <VideoPlayer stream={p.stream} className="hidden" />
+                )}
+              </div>
+              <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs font-medium flex items-center gap-1 backdrop-blur-sm pointer-events-none">
+                {p.userDetails.username} {p.isMuted && <MicOff size={12} className="text-red-400" />}
+              </div>
+              <button 
+                onClick={(e) => { e.stopPropagation(); setPinnedParticipantId(pinnedParticipantId === p.socketId ? null : p.socketId); }}
+                className={`absolute top-2 right-2 p-1.5 rounded bg-black/60 text-white hover:bg-black/80 z-10 ${pinnedParticipantId === p.socketId ? 'text-indigo-400' : ''}`}
+                title="Pin video"
+              >
+                <Pin size={14} />
+              </button>
+              
+              {canManage && (
+                <div className="absolute top-2 left-2 flex gap-1 z-10">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleAdminAction(p.isMuted ? 'unmute' : 'mute', p.socketId); }}
+                    className="p-1.5 rounded bg-black/60 text-white hover:bg-black/80"
+                    title={p.isMuted ? "Force Unmute" : "Force Mute"}
+                  >
+                    {p.isMuted ? <MicOff size={14} className="text-red-400" /> : <Mic size={14} />}
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleAdminAction(p.isVideoOff ? 'video-on' : 'video-off', p.socketId); }}
+                    className="p-1.5 rounded bg-black/60 text-white hover:bg-black/80"
+                    title={p.isVideoOff ? "Force Video On" : "Force Video Off"}
+                  >
+                    {p.isVideoOff ? <VideoOff size={14} className="text-red-400" /> : <Video size={14} />}
+                  </button>
                 </div>
               )}
-              {/* Hidden audio player for remote users without video */}
-              {p.stream && p.stream.getVideoTracks().length === 0 && (
-                <VideoPlayer stream={p.stream} className="hidden" />
-              )}
-              <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs font-medium backdrop-blur-sm">
-                {p.userDetails.username}
-              </div>
             </div>
           ))}
         </div>
@@ -400,18 +579,28 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             <button
               onClick={toggleMute}
               className={`p-3 rounded-full transition-colors ${isMuted ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+              title={isMuted ? "Unmute" : "Mute"}
             >
               {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
             <button
               onClick={toggleVideo}
               className={`p-3 rounded-full transition-colors ${isVideoOff ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+              title={isVideoOff ? "Turn Video On" : "Turn Video Off"}
             >
               {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
             </button>
             <button
+              onClick={toggleScreenShare}
+              className={`p-3 rounded-full transition-colors ${isScreenSharing ? 'bg-indigo-500 text-white hover:bg-indigo-600' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+              title={isScreenSharing ? "Stop Screen Share" : "Share Screen"}
+            >
+              <MonitorUp size={20} />
+            </button>
+            <button
               onClick={() => setShowSettings(!showSettings)}
               className={`p-3 rounded-full transition-colors ${showSettings ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+              title="Settings"
             >
               <Settings size={20} />
             </button>

@@ -22,6 +22,14 @@ const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, 
     );
   }
 
+  if (msg.type === 'system_call_start' || msg.type === 'system_call_end') {
+    return (
+      <div className="my-6 p-4 bg-red-50 border-2 border-red-500 text-red-600 rounded-xl text-center shadow-sm mx-auto max-w-md">
+        <p className="font-bold text-lg">{msg.content}</p>
+      </div>
+    );
+  }
+
   const processedContent = msg.content.replace(/(@[a-zA-Z0-9_]+)/g, '**$1**');
 
   return (
@@ -525,6 +533,7 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
             user={user}
             callType={activeCall}
             onClose={() => toggleCall(activeCall)}
+            canManage={canManage}
           />
         )}
       </div>
