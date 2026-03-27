@@ -55,6 +55,14 @@ async function startServer() {
         io.to(to).emit('signal', { from: socket.id, signal, userId, userDetails });
       });
 
+      socket.on('call-state-change', ({ forumId, isMuted, isVideoOff }) => {
+        socket.to(`call-${forumId}`).emit('call-state-change', { socketId: socket.id, isMuted, isVideoOff });
+      });
+
+      socket.on('admin-action', ({ forumId, action, targetSocketId }) => {
+        socket.to(`call-${forumId}`).emit('admin-action', { action, targetSocketId });
+      });
+
       socket.on('disconnect', () => {
         socket.to(room).emit('user-left', { userId, socketId: socket.id });
       });

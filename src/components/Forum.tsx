@@ -253,7 +253,6 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
       });
       setNewMessage('');
       setReplyingTo(null);
-      loadMessages();
     } catch (err) {
       console.error(err);
     }

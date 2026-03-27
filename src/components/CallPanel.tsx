@@ -148,23 +148,25 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       
       // Update existing peers with new tracks
       Object.values(peersRef.current).forEach(peer => {
-        const senders = peer.getSenders();
+        const transceivers = peer.getTransceivers();
         
-        // Remove senders for kinds that are no longer in the new stream
-        senders.forEach(sender => {
-          if (sender.track && !stream.getTracks().find(t => t.kind === sender.track?.kind)) {
-            peer.removeTrack(sender);
-          }
-        });
+        const audioTransceiver = transceivers.find(t => t.receiver.track.kind === 'audio');
+        const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video');
 
-        stream.getTracks().forEach(track => {
-          const sender = senders.find(s => s.track?.kind === track.kind);
-          if (sender) {
-            sender.replaceTrack(track);
-          } else {
-            peer.addTrack(track, stream);
-          }
-        });
+        const newAudioTrack = stream.getAudioTracks()[0] || null;
+        const newVideoTrack = stream.getVideoTracks()[0] || null;
+
+        if (audioTransceiver && audioTransceiver.sender) {
+          audioTransceiver.sender.replaceTrack(newAudioTrack);
+        } else if (newAudioTrack) {
+          peer.addTrack(newAudioTrack, stream);
+        }
+
+        if (videoTransceiver && videoTransceiver.sender) {
+          videoTransceiver.sender.replaceTrack(newVideoTrack);
+        } else if (newVideoTrack) {
+          peer.addTrack(newVideoTrack, stream);
+        }
       });
     } catch (err) {
       console.error('Error starting stream:', err);
@@ -368,9 +370,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           
           // Replace track for all peers
           Object.values(peersRef.current).forEach(peer => {
-            const sender = peer.getSenders().find(s => s.track?.kind === 'video');
-            if (sender) {
-              sender.replaceTrack(screenTrack);
+            const videoTransceiver = peer.getTransceivers().find(t => t.receiver.track.kind === 'video');
+            if (videoTransceiver && videoTransceiver.sender) {
+              videoTransceiver.sender.replaceTrack(screenTrack);
             } else {
               peer.addTrack(screenTrack, localStreamRef.current!);
             }
@@ -400,9 +402,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         localStreamRef.current.addTrack(originalVideoTrackRef.current);
         
         Object.values(peersRef.current).forEach(peer => {
-          const sender = peer.getSenders().find(s => s.track?.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(originalVideoTrackRef.current);
+          const videoTransceiver = peer.getTransceivers().find(t => t.receiver.track.kind === 'video');
+          if (videoTransceiver && videoTransceiver.sender) {
+            videoTransceiver.sender.replaceTrack(originalVideoTrackRef.current);
           }
         });
       } else {
@@ -602,14 +604,14 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
                 <div className="absolute top-2 left-2 flex gap-1 z-10">
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleAdminAction(p.isMuted ? 'unmute' : 'mute', p.socketId); }}
-                    className={`p-1.5 rounded transition-colors ${p.isMuted ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-black/60 text-white hover:bg-black/80'}`}
+                    className={`p-1.5 rounded transition-colors ${p.isMuted ? 'bg-indigo-500 text-white hover:bg-indigo-600' : 'bg-black/60 text-white hover:bg-black/80'}`}
                     title={p.isMuted ? "Force Unmute" : "Force Mute"}
                   >
                     {p.isMuted ? <MicOff size={14} /> : <Mic size={14} />}
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleAdminAction(p.isVideoOff ? 'video-on' : 'video-off', p.socketId); }}
-                    className={`p-1.5 rounded transition-colors ${p.isVideoOff ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-black/60 text-white hover:bg-black/80'}`}
+                    className={`p-1.5 rounded transition-colors ${p.isVideoOff ? 'bg-indigo-500 text-white hover:bg-indigo-600' : 'bg-black/60 text-white hover:bg-black/80'}`}
                     title={p.isVideoOff ? "Force Video On" : "Force Video Off"}
                   >
                     {p.isVideoOff ? <VideoOff size={14} /> : <Video size={14} />}

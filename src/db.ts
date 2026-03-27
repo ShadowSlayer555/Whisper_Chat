@@ -94,6 +94,15 @@ export const initDb = async () => {
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (forum_id) REFERENCES forums(id)
     );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_forum_id_created_at ON messages(forum_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_office_members_user_id_role ON office_members(user_id, role);
+    CREATE INDEX IF NOT EXISTS idx_office_members_office_id_role ON office_members(office_id, role);
+    CREATE INDEX IF NOT EXISTS idx_forums_office_id ON forums(office_id);
+    CREATE INDEX IF NOT EXISTS idx_forums_creator_id ON forums(creator_id);
+    CREATE INDEX IF NOT EXISTS idx_mentions_forum_user_read ON mentions(forum_id, user_id, is_read);
+    CREATE INDEX IF NOT EXISTS idx_forum_invites_user_id ON forum_invites(user_id);
   `);
 
   // Migrations for existing database
