@@ -7,6 +7,7 @@ import { UserMenu } from './UserMenu';
 import Markdown from 'react-markdown';
 import { CallPanel } from './CallPanel';
 import toast from 'react-hot-toast';
+import { io } from 'socket.io-client';
 
 const MessageNode: React.FC<{ msg: any, user: any, onReply: (msg: any) => void, depth?: number, replyingToId?: number | null, forum: any, canManage: boolean, onMarkSolution: (id: number) => void }> = ({ msg, user, onReply, depth = 0, replyingToId, forum, canManage, onMarkSolution }) => {
   const [collapsed, setCollapsed] = useState(false);
@@ -123,20 +124,31 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
   const [activeCall, setActiveCall] = useState<'video' | 'voice' | null>(null);
   const [aiWarning, setAiWarning] = useState<string | null>(null);
   const [isArchived, setIsArchived] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadForum();
-    loadMessages();
+    loadMessages().finally(() => setLoadingMessages(false));
     markMentionsRead();
     markForumRead();
     
-    const interval = setInterval(() => {
-      loadMessages();
+    const socket = io();
+    socket.emit('join-forum', id);
+    
+    socket.on('new-message', (msg) => {
+      setMessages(prev => {
+        if (prev.find(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
       markForumRead();
-    }, 5000); // Poll for new messages
-    return () => clearInterval(interval);
+    });
+
+    return () => {
+      socket.emit('leave-forum', id);
+      socket.disconnect();
+    };
   }, [id]);
 
   useEffect(() => {
@@ -443,7 +455,9 @@ export function Forum({ user, onUpdateUser, onLogout }: { user: any, onUpdateUse
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 overflow-y-auto p-6 scroll-smooth" ref={messagesEndRef}>
             <div className="max-w-4xl mx-auto pb-6">
-              {threadedMessages.length === 0 ? (
+              {loadingMessages ? (
+                <div className="text-center py-12 text-slate-500">Loading messages...</div>
+              ) : threadedMessages.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">No messages yet. Start the conversation!</div>
               ) : (
                 threadedMessages.map((msg) => (

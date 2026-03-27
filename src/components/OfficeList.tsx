@@ -14,6 +14,7 @@ export function OfficeList({ user, onUpdateUser, onLogout }: { user: any, onUpda
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
   const [reactivateOfficeId, setReactivateOfficeId] = useState<number | null>(null);
   const [reactivateEmail, setReactivateEmail] = useState('');
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -26,6 +27,8 @@ export function OfficeList({ user, onUpdateUser, onLogout }: { user: any, onUpda
       setOffices(data);
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -162,7 +165,12 @@ export function OfficeList({ user, onUpdateUser, onLogout }: { user: any, onUpda
       )}
 
       <div className="grid gap-4">
-        {filteredOffices.length === 0 ? (
+        {loading ? (
+          <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-4"></div>
+            <p className="text-slate-500">Loading offices...</p>
+          </div>
+        ) : filteredOffices.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
             <Building2 className="mx-auto h-12 w-12 text-slate-300 mb-3" />
             <h3 className="text-lg font-medium text-slate-900">

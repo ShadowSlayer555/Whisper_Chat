@@ -149,6 +149,14 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       // Update existing peers with new tracks
       Object.values(peersRef.current).forEach(peer => {
         const senders = peer.getSenders();
+        
+        // Remove senders for kinds that are no longer in the new stream
+        senders.forEach(sender => {
+          if (sender.track && !stream.getTracks().find(t => t.kind === sender.track?.kind)) {
+            peer.removeTrack(sender);
+          }
+        });
+
         stream.getTracks().forEach(track => {
           const sender = senders.find(s => s.track?.kind === track.kind);
           if (sender) {
@@ -190,16 +198,26 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         });
       }
 
+      const pAny = peer as any;
+
       try {
         if (signal.type === 'offer') {
+          const offerCollision = pAny.makingOffer || peer.signalingState !== 'stable';
+          pAny.ignoreOffer = !pAny.isPolite && offerCollision;
+          if (pAny.ignoreOffer) {
+            return;
+          }
           await peer.setRemoteDescription(new RTCSessionDescription(signal));
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(answer);
+          await peer.setLocalDescription();
           socket.emit('signal', { to: from, signal: peer.localDescription });
         } else if (signal.type === 'answer') {
           await peer.setRemoteDescription(new RTCSessionDescription(signal));
         } else if (signal.candidate) {
-          await peer.addIceCandidate(new RTCIceCandidate(signal));
+          try {
+            await peer.addIceCandidate(new RTCIceCandidate(signal));
+          } catch (e) {
+            if (!pAny.ignoreOffer) console.error(e);
+          }
         }
       } catch (err) {
         console.error('Error handling signal:', err);
@@ -256,6 +274,11 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
+    const pAny = peer as any;
+    pAny.isPolite = !initiator;
+    pAny.makingOffer = false;
+    pAny.ignoreOffer = false;
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => peer.addTrack(track, localStreamRef.current!));
     }
@@ -266,21 +289,28 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       }
     };
 
+    peer.onnegotiationneeded = async () => {
+      try {
+        pAny.makingOffer = true;
+        await peer.setLocalDescription();
+        socketRef.current?.emit('signal', { to: socketId, signal: peer.localDescription });
+      } catch (err) {
+        console.error('Error during negotiation:', err);
+      } finally {
+        pAny.makingOffer = false;
+      }
+    };
+
     peer.ontrack = (event) => {
       setParticipants(prev => prev.map(p => {
         if (p.socketId === socketId) {
-          return { ...p, stream: event.streams[0] };
+          // Construct a new MediaStream from all receivers to ensure React detects the change
+          const newStream = new MediaStream(peer.getReceivers().map(r => r.track));
+          return { ...p, stream: newStream };
         }
         return p;
       }));
     };
-
-    if (initiator) {
-      peer.createOffer().then(offer => {
-        peer.setLocalDescription(offer);
-        socketRef.current?.emit('signal', { to: socketId, signal: offer });
-      });
-    }
 
     return peer;
   };
@@ -302,9 +332,10 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     const newVideoState = !isVideoOff;
     setIsVideoOff(newVideoState);
     if (isScreenSharing) {
-      stopScreenShare();
+      await stopScreenShare(newVideoState);
+    } else {
+      await startLocalStream(selectedAudio, selectedVideo, !newVideoState);
     }
-    await startLocalStream(selectedAudio, selectedVideo, !newVideoState);
     if (socketRef.current) {
       socketRef.current.emit('call-state-change', { forumId, isMuted, isVideoOff: newVideoState });
     }
@@ -312,7 +343,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
-      stopScreenShare();
+      await stopScreenShare();
     } else {
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
@@ -340,6 +371,8 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             const sender = peer.getSenders().find(s => s.track?.kind === 'video');
             if (sender) {
               sender.replaceTrack(screenTrack);
+            } else {
+              peer.addTrack(screenTrack, localStreamRef.current!);
             }
           });
           
@@ -356,12 +389,13 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     }
   };
 
-  const stopScreenShare = async () => {
+  const stopScreenShare = async (forceVideoOff?: boolean) => {
+    const targetVideoOff = forceVideoOff !== undefined ? forceVideoOff : isVideoOff;
     if (localStreamRef.current) {
       const screenTrack = localStreamRef.current.getVideoTracks()[0];
       if (screenTrack) screenTrack.stop();
       
-      if (originalVideoTrackRef.current && !isVideoOff) {
+      if (originalVideoTrackRef.current && !targetVideoOff) {
         localStreamRef.current.removeTrack(screenTrack);
         localStreamRef.current.addTrack(originalVideoTrackRef.current);
         
@@ -372,7 +406,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           }
         });
       } else {
-        await startLocalStream(selectedAudio, selectedVideo, !isVideoOff);
+        await startLocalStream(selectedAudio, selectedVideo, !targetVideoOff);
       }
     }
     setIsScreenSharing(false);
@@ -441,7 +475,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
              <div 
                className={`relative h-full aspect-video bg-slate-800 rounded-lg overflow-hidden border-2 transition-colors ${activeSpeakerId === 'local' ? 'border-indigo-500' : 'border-transparent hover:border-slate-600'}`}
              >
-               {localStreamRef.current && !isVideoOff ? (
+               {localStreamRef.current && !isVideoOff && localStreamRef.current.getVideoTracks().length > 0 ? (
                  <VideoPlayer stream={localStreamRef.current} muted className="w-full h-full object-cover" />
                ) : (
                  <div className="w-full h-full flex items-center justify-center">
@@ -486,7 +520,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         </div>
       )}
 
-      <div className={`absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 bg-slate-900 text-white flex flex-col h-full border-l border-slate-800 animate-in slide-in-from-right duration-300 shadow-2xl z-50 ${isFullscreen ? 'hidden' : ''}`}>
+      <div id="call-panel" className={`absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 bg-slate-900 text-white flex flex-col h-full border-l border-slate-800 animate-in slide-in-from-right duration-300 shadow-2xl z-50 ${isFullscreen ? 'hidden' : ''}`}>
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
           <div>
             <h3 className="font-bold text-sm flex items-center gap-2">
@@ -514,7 +548,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             className={`relative bg-slate-800 rounded-xl overflow-hidden aspect-video border-2 transition-colors ${activeSpeakerId === 'local' ? 'border-indigo-500' : 'border-slate-700 hover:border-slate-600'}`}
           >
             <div className="absolute inset-0 cursor-pointer" onClick={() => setIsFullscreen(true)}>
-              {callType === 'video' && !isVideoOff && localStreamRef.current ? (
+              {!isVideoOff && localStreamRef.current && localStreamRef.current.getVideoTracks().length > 0 ? (
                 <VideoPlayer stream={localStreamRef.current} muted className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-slate-800">
@@ -527,8 +561,8 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             </div>
             <button 
               onClick={(e) => { e.stopPropagation(); setPinnedParticipantId(pinnedParticipantId === 'local' ? null : 'local'); }}
-              className={`absolute top-2 right-2 p-1.5 rounded bg-black/60 text-white hover:bg-black/80 z-10 ${pinnedParticipantId === 'local' ? 'text-indigo-400' : ''}`}
-              title="Pin video"
+              className={`absolute top-2 right-2 p-1.5 rounded z-10 transition-colors ${pinnedParticipantId === 'local' ? 'bg-indigo-500 text-white' : 'bg-black/60 text-white hover:bg-black/80'}`}
+              title={pinnedParticipantId === 'local' ? "Unpin video" : "Pin video"}
             >
               <Pin size={14} />
             </button>
@@ -558,8 +592,8 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
               </div>
               <button 
                 onClick={(e) => { e.stopPropagation(); setPinnedParticipantId(pinnedParticipantId === p.socketId ? null : p.socketId); }}
-                className={`absolute top-2 right-2 p-1.5 rounded bg-black/60 text-white hover:bg-black/80 z-10 ${pinnedParticipantId === p.socketId ? 'text-indigo-400' : ''}`}
-                title="Pin video"
+                className={`absolute top-2 right-2 p-1.5 rounded z-10 transition-colors ${pinnedParticipantId === p.socketId ? 'bg-indigo-500 text-white' : 'bg-black/60 text-white hover:bg-black/80'}`}
+                title={pinnedParticipantId === p.socketId ? "Unpin video" : "Pin video"}
               >
                 <Pin size={14} />
               </button>
@@ -568,17 +602,17 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
                 <div className="absolute top-2 left-2 flex gap-1 z-10">
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleAdminAction(p.isMuted ? 'unmute' : 'mute', p.socketId); }}
-                    className="p-1.5 rounded bg-black/60 text-white hover:bg-black/80"
+                    className={`p-1.5 rounded transition-colors ${p.isMuted ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-black/60 text-white hover:bg-black/80'}`}
                     title={p.isMuted ? "Force Unmute" : "Force Mute"}
                   >
-                    {p.isMuted ? <MicOff size={14} className="text-red-400" /> : <Mic size={14} />}
+                    {p.isMuted ? <MicOff size={14} /> : <Mic size={14} />}
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleAdminAction(p.isVideoOff ? 'video-on' : 'video-off', p.socketId); }}
-                    className="p-1.5 rounded bg-black/60 text-white hover:bg-black/80"
+                    className={`p-1.5 rounded transition-colors ${p.isVideoOff ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-black/60 text-white hover:bg-black/80'}`}
                     title={p.isVideoOff ? "Force Video On" : "Force Video Off"}
                   >
-                    {p.isVideoOff ? <VideoOff size={14} className="text-red-400" /> : <Video size={14} />}
+                    {p.isVideoOff ? <VideoOff size={14} /> : <Video size={14} />}
                   </button>
                 </div>
               )}

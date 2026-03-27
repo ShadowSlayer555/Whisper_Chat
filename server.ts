@@ -38,6 +38,14 @@ async function startServer() {
       socket.join(`user-${userId}`);
     });
 
+    socket.on('join-forum', (forumId) => {
+      socket.join(`forum-${forumId}`);
+    });
+
+    socket.on('leave-forum', (forumId) => {
+      socket.leave(`forum-${forumId}`);
+    });
+
     socket.on('join-call', ({ forumId, userId, userDetails, type }) => {
       const room = `call-${forumId}`;
       socket.join(room);
@@ -960,6 +968,21 @@ async function startServer() {
     });
     const messageId = stmt.lastInsertRowid;
 
+    // Fetch the full message with user details to broadcast
+    const newMsgResult = await db.execute({
+      sql: `
+        SELECT m.*, u.username, u.email, u.profile_picture 
+        FROM messages m 
+        JOIN users u ON m.user_id = u.id 
+        WHERE m.id = ?
+      `,
+      args: [messageId]
+    });
+    const newMsg = newMsgResult.rows[0];
+    
+    // Broadcast to everyone in the forum room
+    io.to(`forum-${forumId}`).emit('new-message', newMsg);
+
     const mentionRegex = /@([a-zA-Z0-9_]+)/g;
     const matches = [...content.matchAll(mentionRegex)];
     const mentionedUsernames = [...new Set(matches.map(m => m[1]))];
@@ -1136,10 +1159,21 @@ Return ONLY the warning text, or nothing if it's fine.`;
       const callTypeStr = type === 'video' ? 'Video' : 'Voice';
       const messageContent = `${callTypeStr} Call started at ${timeString} by ${callerDetails.rows[0]?.username}`;
       
-      await db.execute({
-        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_start')",
+      const msgStmt = await db.execute({
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_start') RETURNING *",
         args: [forumId, req.user.id, messageContent]
       });
+      
+      const newMsgResult = await db.execute({
+        sql: `
+          SELECT m.*, u.username, u.email, u.profile_picture 
+          FROM messages m 
+          JOIN users u ON m.user_id = u.id 
+          WHERE m.id = ?
+        `,
+        args: [msgStmt.lastInsertRowid]
+      });
+      io.to(`forum-${forumId}`).emit('new-message', newMsgResult.rows[0]);
 
       for (const uid of userIds) {
         if (uid !== req.user.id) {
@@ -1162,10 +1196,21 @@ Return ONLY the warning text, or nothing if it's fine.`;
       const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const messageContent = `Call ended at ${timeString} by ${callerDetails.rows[0]?.username}`;
       
-      await db.execute({
-        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_end')",
+      const msgStmt = await db.execute({
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_end') RETURNING *",
         args: [forumId, req.user.id, messageContent]
       });
+      
+      const newMsgResult = await db.execute({
+        sql: `
+          SELECT m.*, u.username, u.email, u.profile_picture 
+          FROM messages m 
+          JOIN users u ON m.user_id = u.id 
+          WHERE m.id = ?
+        `,
+        args: [msgStmt.lastInsertRowid]
+      });
+      io.to(`forum-${forumId}`).emit('new-message', newMsgResult.rows[0]);
       
       io.to(`call-${forumId}`).emit('call-ended');
     }

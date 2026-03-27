@@ -22,6 +22,12 @@ export function CallListener({ user }: { user: any }) {
     socket.emit('authenticate', user.id);
 
     socket.on('incoming-call', (data) => {
+      // Check if we are already in this call
+      const hash = window.location.hash;
+      const isAlreadyInCall = hash.includes(`/forum/${data.forumId}`) && document.getElementById('call-panel');
+      
+      if (isAlreadyInCall) return;
+
       if (user.ringtone_enabled && audioRef.current) {
         audioRef.current.currentTime = 0;
         const playPromise = audioRef.current.play();

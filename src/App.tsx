@@ -70,7 +70,19 @@ export default function App() {
   };
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50">Loading...</div>;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white">
+        <div className="flex flex-col items-center space-y-6">
+          <div className="relative w-24 h-24">
+            <div className="absolute inset-0 rounded-full border-t-4 border-indigo-500 animate-spin"></div>
+            <div className="absolute inset-2 rounded-full border-r-4 border-emerald-400 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+            <div className="absolute inset-4 rounded-full border-b-4 border-rose-400 animate-spin" style={{ animationDuration: '2s' }}></div>
+          </div>
+          <h1 className="text-3xl font-bold tracking-wider animate-pulse">Whisper Chat</h1>
+          <p className="text-slate-400 font-medium tracking-widest uppercase text-sm">Connecting securely...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
