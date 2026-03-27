@@ -65,6 +65,10 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use(cookieParser());
 
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+
   // Global BigInt serializer for JSON responses
   (BigInt.prototype as any).toJSON = function () {
     return this.toString();
@@ -1160,7 +1164,7 @@ Return ONLY the warning text, or nothing if it's fine.`;
       const messageContent = `${callTypeStr} Call started at ${timeString} by ${callerDetails.rows[0]?.username}`;
       
       const msgStmt = await db.execute({
-        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_start') RETURNING *",
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_start')",
         args: [forumId, req.user.id, messageContent]
       });
       
@@ -1197,7 +1201,7 @@ Return ONLY the warning text, or nothing if it's fine.`;
       const messageContent = `Call ended at ${timeString} by ${callerDetails.rows[0]?.username}`;
       
       const msgStmt = await db.execute({
-        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_end') RETURNING *",
+        sql: "INSERT INTO messages (forum_id, user_id, content, type) VALUES (?, ?, ?, 'system_call_end')",
         args: [forumId, req.user.id, messageContent]
       });
       
