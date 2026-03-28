@@ -27,6 +27,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(callType === 'voice');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [permissionError, setPermissionError] = useState(false);
   
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -70,6 +71,15 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
     const ctx = audioCtxRef.current;
+    
+    // Resume context if it's suspended (browsers require user interaction)
+    const resumeAudioContext = () => {
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+    };
+    
+    document.addEventListener('click', resumeAudioContext, { once: true });
 
     const interval = setInterval(() => {
       let maxVol = 0;
@@ -115,7 +125,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   const getDevices = async () => {
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true, video: callType === 'video' });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: callType === 'video' });
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audio = devices.filter(d => d.kind === 'audioinput');
       const video = devices.filter(d => d.kind === 'videoinput');
@@ -123,8 +133,13 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       setVideoDevices(video);
       if (audio.length > 0) setSelectedAudio(audio[0].deviceId);
       if (video.length > 0) setSelectedVideo(video[0].deviceId);
-    } catch (err) {
+      stream.getTracks().forEach(track => track.stop());
+      setPermissionError(false);
+    } catch (err: any) {
       console.error('Error getting devices:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'NotFoundError' || err.message?.toLowerCase().includes('permission')) {
+        setPermissionError(true);
+      }
     }
   };
 
@@ -138,6 +153,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
         video: requestVideo ? (videoId ? { deviceId: { exact: videoId } } : true) : false
       });
       
+      setPermissionError(false);
       // Apply current mute state to new audio tracks
       stream.getAudioTracks().forEach(track => {
         track.enabled = !isMuted;
@@ -168,8 +184,11 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           peer.addTrack(newVideoTrack, stream);
         }
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error starting stream:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'NotFoundError' || err.message?.toLowerCase().includes('permission')) {
+        setPermissionError(true);
+      }
     }
   };
 
@@ -440,6 +459,34 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   return (
     <>
+      {permissionError && (
+        <div className="absolute inset-0 z-[200] bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6">
+            <AlertTriangle className="w-10 h-10 text-red-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Permissions Required</h2>
+          <p className="text-slate-400 mb-8 max-w-md">
+            We need access to your camera and microphone to join the call. Please grant permissions when prompted.
+          </p>
+          <div className="flex gap-4">
+            <button
+              onClick={onClose}
+              className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                getDevices().then(() => startLocalStream());
+              }}
+              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors"
+            >
+              Grant Permissions
+            </button>
+          </div>
+        </div>
+      )}
+
       {isFullscreen && (
         <div className="fixed inset-0 z-[100] bg-black flex flex-col">
           <button onClick={() => setIsFullscreen(false)} className="absolute top-6 right-6 z-50 p-3 bg-slate-800/80 hover:bg-slate-700 rounded-full text-white transition-colors">
@@ -459,6 +506,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
                 <h2 className="text-3xl font-bold text-white">{activeParticipant?.userDetails?.username}</h2>
                 <p className="text-slate-400 mt-2">{activeParticipant?.isMuted ? 'Muted' : 'Speaking...'}</p>
               </div>
+            )}
+            {activeParticipant?.stream && (activeParticipant.stream.getVideoTracks().length === 0 || activeParticipant.isVideoOff) && (
+              <AudioPlayer stream={activeParticipant.stream} muted={activeParticipant.socketId === 'local'} />
             )}
             
             <div className="absolute bottom-10 left-10 bg-black/60 px-4 py-2 rounded-lg text-white font-medium backdrop-blur-md border border-white/10 flex items-center gap-2">
@@ -506,6 +556,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
                    <div className="w-full h-full flex items-center justify-center">
                      <img src={p.userDetails.profile_picture} alt="" className="w-10 h-10 rounded-full" />
                    </div>
+                 )}
+                 {p.stream && (p.stream.getVideoTracks().length === 0 || p.isVideoOff) && (
+                   <AudioPlayer stream={p.stream} />
                  )}
                  <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[10px] text-white flex items-center gap-1">
                    {p.userDetails.username} {p.isMuted && <MicOff size={10} className="text-red-400" />}
@@ -586,7 +639,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
                 )}
                 {/* Hidden audio player for remote users without video */}
                 {p.stream && (p.stream.getVideoTracks().length === 0 || p.isVideoOff) && (
-                  <VideoPlayer stream={p.stream} className="hidden" />
+                  <AudioPlayer stream={p.stream} />
                 )}
               </div>
               <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs font-medium flex items-center gap-1 backdrop-blur-sm pointer-events-none">
@@ -694,4 +747,12 @@ const VideoPlayer = ({ stream, muted = false, className = "w-full h-full object-
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
   return <video ref={ref} autoPlay playsInline muted={muted} className={className} />;
+};
+
+const AudioPlayer = ({ stream, muted = false }: { stream: MediaStream, muted?: boolean }) => {
+  const ref = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream;
+  }, [stream]);
+  return <audio ref={ref} autoPlay muted={muted} className="hidden" />;
 };
