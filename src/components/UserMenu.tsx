@@ -12,6 +12,13 @@ export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  React.useEffect(() => {
+    setUsername(user.username);
+    setProfilePic(user.profile_picture);
+    setNotificationsEnabled(!!user.notifications_enabled);
+    setRingtoneEnabled(!!user.ringtone_enabled);
+  }, [user]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {

@@ -9,24 +9,24 @@ export function CallListener({ user }: { user: any }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio('/universfield-ringtone.mp3');
-      audioRef.current.loop = true;
-      
-      const unlockAudio = () => {
-        if (audioRef.current && audioRef.current.paused) {
-          audioRef.current.play().then(() => {
-            audioRef.current?.pause();
-            if (audioRef.current) audioRef.current.currentTime = 0;
-          }).catch(() => {});
-        }
-        document.removeEventListener('click', unlockAudio);
-        document.removeEventListener('touchstart', unlockAudio);
-      };
-      
-      document.addEventListener('click', unlockAudio);
-      document.addEventListener('touchstart', unlockAudio);
-    }
+    const unlockAudio = () => {
+      if (audioRef.current && audioRef.current.paused) {
+        audioRef.current.play().then(() => {
+          audioRef.current?.pause();
+          if (audioRef.current) audioRef.current.currentTime = 0;
+        }).catch(() => {});
+      }
+      document.removeEventListener('click', unlockAudio);
+      document.removeEventListener('touchstart', unlockAudio);
+    };
+    
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('touchstart', unlockAudio);
+
+    return () => {
+      document.removeEventListener('click', unlockAudio);
+      document.removeEventListener('touchstart', unlockAudio);
+    };
   }, []);
 
   useEffect(() => {
@@ -99,7 +99,9 @@ export function CallListener({ user }: { user: any }) {
     };
   }, [user]);
 
-  if (!incomingCall) return null;
+  if (!incomingCall) {
+    return <audio ref={audioRef} src="/universfield-ringtone.mp3" loop playsInline className="hidden" />;
+  }
 
   const handleAccept = (type: 'video' | 'voice') => {
     if (audioRef.current) {
@@ -122,7 +124,9 @@ export function CallListener({ user }: { user: any }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-slate-900/90 backdrop-blur-xl flex flex-col items-center justify-center">
+    <>
+      <audio ref={audioRef} src="/universfield-ringtone.mp3" loop playsInline className="hidden" />
+      <div className="fixed inset-0 z-[9999] bg-slate-900/90 backdrop-blur-xl flex flex-col items-center justify-center">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-500/20 rounded-full blur-3xl"></div>
       </div>
@@ -169,5 +173,6 @@ export function CallListener({ user }: { user: any }) {
         </div>
       </div>
     </div>
+    </>
   );
 }

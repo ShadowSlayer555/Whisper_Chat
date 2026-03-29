@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Mic, MicOff, Video, VideoOff, X, Settings, Maximize2, MonitorUp, Pin, Shield } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, X, Settings, Maximize2, MonitorUp, Pin, Shield, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface CallPanelProps {
@@ -191,12 +191,18 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
         if (audioTransceiver && audioTransceiver.sender) {
           audioTransceiver.sender.replaceTrack(newAudioTrack);
+          if (newAudioTrack && (audioTransceiver.direction === 'recvonly' || audioTransceiver.direction === 'inactive')) {
+            audioTransceiver.direction = 'sendrecv';
+          }
         } else if (newAudioTrack) {
           peer.addTrack(newAudioTrack, stream);
         }
 
         if (videoTransceiver && videoTransceiver.sender) {
           videoTransceiver.sender.replaceTrack(newVideoTrack);
+          if (newVideoTrack && (videoTransceiver.direction === 'recvonly' || videoTransceiver.direction === 'inactive')) {
+            videoTransceiver.direction = 'sendrecv';
+          }
         } else if (newVideoTrack) {
           peer.addTrack(newVideoTrack, stream);
         }
@@ -311,6 +317,10 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     const peer = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
         { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
         { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
         { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
@@ -347,9 +357,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     peer.ontrack = (event) => {
       setParticipants(prev => prev.map(p => {
         if (p.socketId === socketId) {
-          // Construct a new MediaStream from all receivers to ensure React detects the change
-          const newStream = new MediaStream(peer.getReceivers().map(r => r.track));
-          return { ...p, stream: newStream };
+          // Use the existing stream from the event to avoid reassigning srcObject on iOS
+          const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+          return { ...p, stream };
         }
         return p;
       }));
@@ -414,6 +424,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             const videoTransceiver = peer.getTransceivers().find(t => t.receiver.track.kind === 'video');
             if (videoTransceiver && videoTransceiver.sender) {
               videoTransceiver.sender.replaceTrack(screenTrack);
+              if (videoTransceiver.direction === 'recvonly' || videoTransceiver.direction === 'inactive') {
+                videoTransceiver.direction = 'sendrecv';
+              }
             } else {
               peer.addTrack(screenTrack, localStreamRef.current!);
             }
@@ -446,6 +459,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           const videoTransceiver = peer.getTransceivers().find(t => t.receiver.track.kind === 'video');
           if (videoTransceiver && videoTransceiver.sender) {
             videoTransceiver.sender.replaceTrack(originalVideoTrackRef.current);
+            if (originalVideoTrackRef.current && (videoTransceiver.direction === 'recvonly' || videoTransceiver.direction === 'inactive')) {
+              videoTransceiver.direction = 'sendrecv';
+            }
           }
         });
       } else {
@@ -765,16 +781,28 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
 const VideoPlayer = ({ stream, muted = false, className = "w-full h-full object-cover" }: { stream: MediaStream, muted?: boolean, className?: string }) => {
   const ref = useRef<HTMLVideoElement>(null);
+  const trackCount = stream.getTracks().length;
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream;
-  }, [stream]);
+    if (ref.current) {
+      if (ref.current.srcObject !== stream) {
+        ref.current.srcObject = stream;
+      }
+      ref.current.play().catch(e => console.warn("Video play failed:", e));
+    }
+  }, [stream, trackCount]);
   return <video ref={ref} autoPlay playsInline muted={muted} className={className} />;
 };
 
 const AudioPlayer = ({ stream, muted = false }: { stream: MediaStream, muted?: boolean }) => {
   const ref = useRef<HTMLAudioElement>(null);
+  const trackCount = stream.getTracks().length;
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream;
-  }, [stream]);
+    if (ref.current) {
+      if (ref.current.srcObject !== stream) {
+        ref.current.srcObject = stream;
+      }
+      ref.current.play().catch(e => console.warn("Audio play failed:", e));
+    }
+  }, [stream, trackCount]);
   return <audio ref={ref} autoPlay playsInline muted={muted} className="hidden" />;
 };
