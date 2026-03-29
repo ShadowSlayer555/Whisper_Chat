@@ -12,6 +12,20 @@ export function CallListener({ user }: { user: any }) {
     if (!audioRef.current) {
       audioRef.current = new Audio('/universfield-ringtone.mp3');
       audioRef.current.loop = true;
+      
+      const unlockAudio = () => {
+        if (audioRef.current && audioRef.current.paused) {
+          audioRef.current.play().then(() => {
+            audioRef.current?.pause();
+            if (audioRef.current) audioRef.current.currentTime = 0;
+          }).catch(() => {});
+        }
+        document.removeEventListener('click', unlockAudio);
+        document.removeEventListener('touchstart', unlockAudio);
+      };
+      
+      document.addEventListener('click', unlockAudio);
+      document.addEventListener('touchstart', unlockAudio);
     }
   }, []);
 

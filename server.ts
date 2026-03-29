@@ -34,6 +34,10 @@ async function startServer() {
 
   // WebRTC Signaling
   io.on('connection', (socket) => {
+    let currentRoom: string | null = null;
+    let currentUserId: string | null = null;
+    let currentUserDetails: any = null;
+
     socket.on('authenticate', (userId) => {
       socket.join(`user-${userId}`);
     });
@@ -47,25 +51,33 @@ async function startServer() {
     });
 
     socket.on('join-call', ({ forumId, userId, userDetails, type }) => {
-      const room = `call-${forumId}`;
-      socket.join(room);
-      socket.to(room).emit('user-joined', { userId, socketId: socket.id, userDetails, type });
+      if (currentRoom) {
+        socket.leave(currentRoom);
+        socket.to(currentRoom).emit('user-left', { userId: currentUserId, socketId: socket.id });
+      }
+      currentRoom = `call-${forumId}`;
+      currentUserId = userId;
+      currentUserDetails = userDetails;
+      socket.join(currentRoom);
+      socket.to(currentRoom).emit('user-joined', { userId, socketId: socket.id, userDetails, type });
+    });
 
-      socket.on('signal', ({ to, signal }) => {
-        io.to(to).emit('signal', { from: socket.id, signal, userId, userDetails });
-      });
+    socket.on('signal', ({ to, signal }) => {
+      io.to(to).emit('signal', { from: socket.id, signal, userId: currentUserId, userDetails: currentUserDetails });
+    });
 
-      socket.on('call-state-change', ({ forumId, isMuted, isVideoOff }) => {
-        socket.to(`call-${forumId}`).emit('call-state-change', { socketId: socket.id, isMuted, isVideoOff });
-      });
+    socket.on('call-state-change', ({ forumId, isMuted, isVideoOff }) => {
+      socket.to(`call-${forumId}`).emit('call-state-change', { socketId: socket.id, isMuted, isVideoOff });
+    });
 
-      socket.on('admin-action', ({ forumId, action, targetSocketId }) => {
-        socket.to(`call-${forumId}`).emit('admin-action', { action, targetSocketId });
-      });
+    socket.on('admin-action', ({ forumId, action, targetSocketId }) => {
+      socket.to(`call-${forumId}`).emit('admin-action', { action, targetSocketId });
+    });
 
-      socket.on('disconnect', () => {
-        socket.to(room).emit('user-left', { userId, socketId: socket.id });
-      });
+    socket.on('disconnect', () => {
+      if (currentRoom) {
+        socket.to(currentRoom).emit('user-left', { userId: currentUserId, socketId: socket.id });
+      }
     });
   });
 

@@ -77,9 +77,12 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       if (ctx.state === 'suspended') {
         ctx.resume();
       }
+      document.removeEventListener('click', resumeAudioContext);
+      document.removeEventListener('touchstart', resumeAudioContext);
     };
     
-    document.addEventListener('click', resumeAudioContext, { once: true });
+    document.addEventListener('click', resumeAudioContext);
+    document.addEventListener('touchstart', resumeAudioContext);
 
     const interval = setInterval(() => {
       let maxVol = 0;
@@ -148,10 +151,24 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       localStreamRef.current.getTracks().forEach(track => track.stop());
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioId ? { deviceId: { exact: audioId } } : true,
-        video: requestVideo ? (videoId ? { deviceId: { exact: videoId } } : true) : false
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioId ? { deviceId: { exact: audioId } } : true,
+          video: requestVideo ? (videoId ? { deviceId: { exact: videoId } } : true) : false
+        });
+      } catch (err: any) {
+        if (requestVideo && err.name === 'NotFoundError') {
+          console.warn('Video device not found, falling back to audio only');
+          setIsVideoOff(true);
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: audioId ? { deviceId: { exact: audioId } } : true,
+            video: false
+          });
+        } else {
+          throw err;
+        }
+      }
       
       setPermissionError(false);
       // Apply current mute state to new audio tracks
@@ -292,7 +309,12 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   const createPeer = (socketId: string, initiator: boolean) => {
     const peer = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+      ]
     });
 
     const pAny = peer as any;
@@ -497,7 +519,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             {activeParticipant?.stream && activeParticipant.stream.getVideoTracks().length > 0 && !activeParticipant.isVideoOff ? (
               <VideoPlayer 
                 stream={activeParticipant.stream} 
-                muted={activeParticipant.socketId === 'local'} 
+                muted={true} 
                 className="w-full h-full object-contain rounded-2xl" 
               />
             ) : (
@@ -508,7 +530,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
               </div>
             )}
             {activeParticipant?.stream && (activeParticipant.stream.getVideoTracks().length === 0 || activeParticipant.isVideoOff) && (
-              <AudioPlayer stream={activeParticipant.stream} muted={activeParticipant.socketId === 'local'} />
+              <AudioPlayer stream={activeParticipant.stream} muted={true} />
             )}
             
             <div className="absolute bottom-10 left-10 bg-black/60 px-4 py-2 rounded-lg text-white font-medium backdrop-blur-md border border-white/10 flex items-center gap-2">
@@ -754,5 +776,5 @@ const AudioPlayer = ({ stream, muted = false }: { stream: MediaStream, muted?: b
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
-  return <audio ref={ref} autoPlay muted={muted} className="hidden" />;
+  return <audio ref={ref} autoPlay playsInline muted={muted} className="hidden" />;
 };
