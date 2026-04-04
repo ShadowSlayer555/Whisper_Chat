@@ -26,6 +26,13 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(callType === 'voice');
+  const isMutedRef = useRef(isMuted);
+  const isVideoOffRef = useRef(isVideoOff);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+    isVideoOffRef.current = isVideoOff;
+  }, [isMuted, isVideoOff]);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [permissionError, setPermissionError] = useState(false);
   
@@ -128,15 +135,20 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
 
   const getDevices = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: callType === 'video' });
-      const devices = await navigator.mediaDevices.enumerateDevices();
+      let devices = await navigator.mediaDevices.enumerateDevices();
+      // If labels are empty, we need to request permission first
+      if (devices.length > 0 && devices[0].label === '') {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: callType === 'video' });
+        devices = await navigator.mediaDevices.enumerateDevices();
+        stream.getTracks().forEach(track => track.stop());
+      }
+      
       const audio = devices.filter(d => d.kind === 'audioinput');
       const video = devices.filter(d => d.kind === 'videoinput');
       setAudioDevices(audio);
       setVideoDevices(video);
       if (audio.length > 0) setSelectedAudio(audio[0].deviceId);
       if (video.length > 0) setSelectedVideo(video[0].deviceId);
-      stream.getTracks().forEach(track => track.stop());
       setPermissionError(false);
     } catch (err: any) {
       console.error('Error getting devices:', err);
@@ -251,14 +263,14 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           if (pAny.ignoreOffer) {
             return;
           }
-          await peer.setRemoteDescription(new RTCSessionDescription(signal));
+          await peer.setRemoteDescription(signal);
           await peer.setLocalDescription();
           socket.emit('signal', { to: from, signal: peer.localDescription });
         } else if (signal.type === 'answer') {
-          await peer.setRemoteDescription(new RTCSessionDescription(signal));
+          await peer.setRemoteDescription(signal);
         } else if (signal.candidate) {
           try {
-            await peer.addIceCandidate(new RTCIceCandidate(signal));
+            await peer.addIceCandidate(signal);
           } catch (e) {
             if (!pAny.ignoreOffer) console.error(e);
           }
@@ -292,22 +304,22 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           if (localStreamRef.current) {
             localStreamRef.current.getAudioTracks().forEach(track => track.enabled = false);
             setIsMuted(true);
-            socketRef.current?.emit('call-state-change', { forumId, isMuted: true, isVideoOff });
+            socketRef.current?.emit('call-state-change', { forumId, isMuted: true, isVideoOff: isVideoOffRef.current });
           }
         } else if (action === 'unmute') {
           if (localStreamRef.current) {
             localStreamRef.current.getAudioTracks().forEach(track => track.enabled = true);
             setIsMuted(false);
-            socketRef.current?.emit('call-state-change', { forumId, isMuted: false, isVideoOff });
+            socketRef.current?.emit('call-state-change', { forumId, isMuted: false, isVideoOff: isVideoOffRef.current });
           }
         } else if (action === 'video-off') {
            setIsVideoOff(true);
            startLocalStream(selectedAudio, selectedVideo, false);
-           socketRef.current?.emit('call-state-change', { forumId, isMuted, isVideoOff: true });
+           socketRef.current?.emit('call-state-change', { forumId, isMuted: isMutedRef.current, isVideoOff: true });
         } else if (action === 'video-on') {
            setIsVideoOff(false);
            startLocalStream(selectedAudio, selectedVideo, true);
-           socketRef.current?.emit('call-state-change', { forumId, isMuted, isVideoOff: false });
+           socketRef.current?.emit('call-state-change', { forumId, isMuted: isMutedRef.current, isVideoOff: false });
         }
       }
     });
@@ -515,7 +527,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             </button>
             <button
               onClick={() => {
-                getDevices().then(() => startLocalStream());
+                startLocalStream().then(() => getDevices());
               }}
               className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors"
             >

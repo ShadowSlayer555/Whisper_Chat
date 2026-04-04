@@ -16,30 +16,45 @@ export function NotificationPrompt({ user, onUpdateUser }: { user: any, onUpdate
   const handleAccept = async () => {
     let notificationsEnabled = false;
     
+    const savePreferences = async (enabled: boolean) => {
+      try {
+        await fetchApi('/api/auth/settings', {
+          method: 'PUT',
+          body: JSON.stringify({ notifications_enabled: enabled, ringtone_enabled: true })
+        });
+        onUpdateUser({ ...user, notifications_enabled: enabled, ringtone_enabled: true });
+        toast.success('Preferences saved');
+      } catch (err) {
+        console.error(err);
+      }
+      localStorage.setItem(`prompted_notifications_${user.id}`, 'true');
+      setShow(false);
+    };
+
     if ('Notification' in window) {
       if (Notification.permission === 'granted') {
-        notificationsEnabled = true;
+        savePreferences(true);
       } else if (Notification.permission !== 'denied') {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          notificationsEnabled = true;
+        try {
+          const promise = Notification.requestPermission((permission) => {
+            if (!promise) { // If it doesn't return a promise, handle it here
+              savePreferences(permission === 'granted');
+            }
+          });
+          if (promise) {
+            promise.then((permission) => {
+              savePreferences(permission === 'granted');
+            });
+          }
+        } catch (e) {
+          savePreferences(false);
         }
+      } else {
+        savePreferences(false);
       }
+    } else {
+      savePreferences(false);
     }
-
-    try {
-      await fetchApi('/api/auth/settings', {
-        method: 'PUT',
-        body: JSON.stringify({ notifications_enabled: notificationsEnabled, ringtone_enabled: true })
-      });
-      onUpdateUser({ ...user, notifications_enabled: notificationsEnabled, ringtone_enabled: true });
-      toast.success('Preferences saved');
-    } catch (err) {
-      console.error(err);
-    }
-
-    localStorage.setItem(`prompted_notifications_${user.id}`, 'true');
-    setShow(false);
   };
 
   const handleDecline = () => {

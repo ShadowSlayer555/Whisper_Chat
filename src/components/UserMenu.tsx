@@ -53,7 +53,7 @@ export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u
     }
   };
 
-  const requestNotificationPermission = async () => {
+  const requestNotificationPermission = () => {
     if (!('Notification' in window)) {
       toast.error('This browser does not support desktop notification');
       return;
@@ -62,12 +62,29 @@ export function UserMenu({ user, onUpdate, onLogout }: { user: any, onUpdate: (u
       setNotificationsEnabled(true);
       setRingtoneEnabled(true);
     } else if (Notification.permission !== 'denied') {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        setNotificationsEnabled(true);
-        setRingtoneEnabled(true);
-      } else {
-        toast.error('Notification permission denied');
+      try {
+        const promise = Notification.requestPermission((permission) => {
+          if (!promise) {
+            if (permission === 'granted') {
+              setNotificationsEnabled(true);
+              setRingtoneEnabled(true);
+            } else {
+              toast.error('Notification permission denied');
+            }
+          }
+        });
+        if (promise) {
+          promise.then((permission) => {
+            if (permission === 'granted') {
+              setNotificationsEnabled(true);
+              setRingtoneEnabled(true);
+            } else {
+              toast.error('Notification permission denied');
+            }
+          });
+        }
+      } catch (e) {
+        toast.error('Failed to request notification permission');
       }
     } else {
       toast.error('Please enable notifications in your browser settings');
