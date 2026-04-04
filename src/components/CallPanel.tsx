@@ -170,8 +170,9 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
           video: requestVideo ? (videoId ? { deviceId: { exact: videoId } } : true) : false
         });
       } catch (err: any) {
-        if (requestVideo && err.name === 'NotFoundError') {
-          console.warn('Video device not found, falling back to audio only');
+        console.warn('Failed to get requested media:', err);
+        if (requestVideo) {
+          console.warn('Falling back to audio only');
           setIsVideoOff(true);
           stream = await navigator.mediaDevices.getUserMedia({
             audio: audioId ? { deviceId: { exact: audioId } } : true,
@@ -264,15 +265,37 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
             return;
           }
           await peer.setRemoteDescription(signal);
-          await peer.setLocalDescription();
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
           socket.emit('signal', { to: from, signal: peer.localDescription });
+          
+          // Process queued candidates
+          if (pAny.iceQueue) {
+            for (const candidate of pAny.iceQueue) {
+              await peer.addIceCandidate(candidate);
+            }
+            pAny.iceQueue = [];
+          }
         } else if (signal.type === 'answer') {
           await peer.setRemoteDescription(signal);
+          
+          // Process queued candidates
+          if (pAny.iceQueue) {
+            for (const candidate of pAny.iceQueue) {
+              await peer.addIceCandidate(candidate);
+            }
+            pAny.iceQueue = [];
+          }
         } else if (signal.candidate) {
-          try {
-            await peer.addIceCandidate(signal);
-          } catch (e) {
-            if (!pAny.ignoreOffer) console.error(e);
+          if (peer.remoteDescription) {
+            try {
+              await peer.addIceCandidate(signal);
+            } catch (e) {
+              if (!pAny.ignoreOffer) console.error(e);
+            }
+          } else {
+            if (!pAny.iceQueue) pAny.iceQueue = [];
+            pAny.iceQueue.push(signal);
           }
         }
       } catch (err) {
@@ -357,7 +380,8 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
     peer.onnegotiationneeded = async () => {
       try {
         pAny.makingOffer = true;
-        await peer.setLocalDescription();
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
         socketRef.current?.emit('signal', { to: socketId, signal: peer.localDescription });
       } catch (err) {
         console.error('Error during negotiation:', err);
@@ -366,12 +390,13 @@ export const CallPanel: React.FC<CallPanelProps> = ({ forumId, forumTitle, user,
       }
     };
 
+    const remoteStream = new MediaStream();
+
     peer.ontrack = (event) => {
+      remoteStream.addTrack(event.track);
       setParticipants(prev => prev.map(p => {
         if (p.socketId === socketId) {
-          // Use the existing stream from the event to avoid reassigning srcObject on iOS
-          const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
-          return { ...p, stream };
+          return { ...p, stream: remoteStream };
         }
         return p;
       }));
